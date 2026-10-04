@@ -146,12 +146,12 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("VEC_DEADBAND", 17, AP_MotorsUGV, _vec_deadband, 0.03f),
 
-    // @Param: VEC_BLEND_THR
+    // @Param: VEC_BLND_THR
     // @DisplayName: Vectored thrust blend throttle
     // @Description: Filtered throttle below which the vectored angle blends from direct steering-proportional angle into full atan(); 0 = legacy atan() always
     // @Range: 0.0 1.0
     // @User: Advanced
-    AP_GROUPINFO("VEC_BLEND_THR", 18, AP_MotorsUGV, _vec_blend_thr, 0.3f),
+    AP_GROUPINFO("VEC_BLND_THR", 18, AP_MotorsUGV, _vec_blend_thr, 0.3f),
 
     // @Param: VEC_RESID_TC
     // @DisplayName: Vectored thrust throttle filter time constant
@@ -161,253 +161,253 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("VEC_RESID_TC", 19, AP_MotorsUGV, _vec_resid_tc, 0.5f),
 
-    // not reused - members _cur_est_tc/_cur_est_blend no longer exist (replaced  
-    // by per-source write-time gain + shared max-age below). Reusing a param  
-    // index would silently reinterpret old EEPROM values as a different param.  
-  
-    // @Param: DRIFT_GAIN_LOIT  
-    // @DisplayName: Loiter-sourced drift compensation gain  
+    // not reused - members _cur_est_tc/_cur_est_blend no longer exist (replaced
+    // by per-source write-time gain + shared max-age below). Reusing a param
+    // index would silently reinterpret old EEPROM values as a different param.
+
+    // @Param: DRIFT_G_LOIT
+    // @DisplayName: Loiter-sourced drift compensation gain
     // @Description: Gain applied to Loiter-sourced drift samples at write-time. 0 disables this source, 1 = full, 2 = double compensation
-    // @Range: 0.0 2.0  
-    // @User: Advanced  
-    AP_GROUPINFO("DRIFT_GAIN_LOIT", 23, AP_MotorsUGV, _drift_comp_gain_loiter, 1.0f),  
-  
-    // @Param: DRIFT_GAIN_NAV  
-    // @DisplayName: Nav-sourced drift compensation gain  
+    // @Range: 0.0 2.0
+    // @User: Advanced
+    AP_GROUPINFO("DRIFT_G_LOIT", 23, AP_MotorsUGV, _drift_comp_gain_loiter, 1.0f),
+
+    // @Param: DRIFT_G_NAV
+    // @DisplayName: Nav-sourced drift compensation gain
     // @Description: Gain applied to nav-mode (Auto/Guided/RTL) drift samples at write-time. 0 disables this source, 1 = full, 2 = double compensation
-    // @Range: 0.0 2.0  
-    // @User: Advanced  
-    AP_GROUPINFO("DRIFT_GAIN_NAV", 24, AP_MotorsUGV, _drift_comp_gain_nav, 1.0f),  
-  
-    // @Param: DRIFT_MAXAGE    
-    // @DisplayName: Drift estimate maximum age    
+    // @Range: 0.0 2.0
+    // @User: Advanced
+    AP_GROUPINFO("DRIFT_G_NAV", 24, AP_MotorsUGV, _drift_comp_gain_nav, 1.0f),
+
+    // @Param: DRIFT_MAXAGE
+    // @DisplayName: Drift estimate maximum age
     // @Description: Staleness cutoff (s) shared by both drift sources. If no estimate was updated within this time, correction expires (safety for dead estimators / long manual). 0 = never trust any estimate
-    // @Units: s    
-    // @Range: 0 3600    
-    // @User: Advanced    
-    AP_GROUPINFO("DRIFT_MAXAGE", 25, AP_MotorsUGV, _drift_max_age_s, 1800.0f),  
-  
-    // @Param: SFL_DB    
-    // @DisplayName: Steering-floor deadband    
-    // @Description: Heading error (deg) below which the vectored-thrust steering-to-throttle floor injects no throttle    
-    // @Units: deg    
-    // @Range: 0 45    
-    // @User: Advanced    
-    AP_GROUPINFO("SFL_DB", 26, AP_MotorsUGV, _sfl_deadband_deg, 10.0f),  
-  
-    // @Param: SFL_GAIN    
-    // @DisplayName: Steering-floor gain    
-    // @Description: Floor throttle percent per degree of heading error above the deadband    
-    // @Units: %/deg    
-    // @Range: 0 5    
-    // @User: Advanced    
-    AP_GROUPINFO("SFL_GAIN", 27, AP_MotorsUGV, _sfl_gain, 0.7f),  
-  
-    // @Param: SFL_MAX    
-    // @DisplayName: Steering-floor maximum    
-    // @Description: Maximum throttle percent the steering-floor is allowed to inject    
-    // @Units: %    
-    // @Range: 0 50    
-    // @User: Advanced    
-    AP_GROUPINFO("SFL_MAX", 28, AP_MotorsUGV, _sfl_max_pct, 20.0f),  
-  
-    // @Param: SFL_IFRZ    
-    // @DisplayName: Steering-floor I-term freeze threshold    
-    // @Description: Heading error (deg) above which the speed PID integrator is frozen to prevent windup while rotating in place    
-    // @Units: deg    
-    // @Range: 10 90    
-    // @User: Advanced    
-    AP_GROUPINFO("SFL_IFRZ", 29, AP_MotorsUGV, _sfl_ifreeze_deg, 45.0f),  
-  
-    // @Param: LOIT_DRIFT_MIN    
-    // @DisplayName: Loiter drift minimum magnitude    
-    // @Description: Drift estimate (m/s) below which the loiter anti-drift heading is not activated; deadband against GPS/estimate noise    
-    // @Units: m/s    
-    // @Range: 0 0.5    
-    // @User: Advanced    
-    AP_GROUPINFO("LOIT_DRIFT_MIN", 30, AP_MotorsUGV, _loit_drift_min, 0.03f),  
-  
-    // @Param: LOIT_COAST_THR    
-    // @DisplayName: Loiter coasting throttle threshold    
-    // @Description: Pre-floor navigation throttle demand (%) below which the vehicle is considered coasting for method-1 drift sampling    
-    // @Units: %    
-    // @Range: 0 10    
-    // @User: Advanced    
-    AP_GROUPINFO("LOIT_COAST_THR", 31, AP_MotorsUGV, _loit_coast_thr, 1.0f),  
-  
-    // @Param: LOIT_I_EQERR    
-    // @DisplayName: Loiter drift method-2 equilibrium error    
-    // @Description: Speed-PID error (m/s) below which the I-term is considered at drift equilibrium during the decel-to-stop window    
-    // @Units: m/s    
-    // @Range: 0 0.5    
-    // @User: Advanced    
-    AP_GROUPINFO("LOIT_I_EQERR", 32, AP_MotorsUGV, _loit_i_eq_err, 0.10f),  
-  
-    // @Param: LOIT_I_MIN    
-    // @DisplayName: Loiter drift method-2 minimum I-term    
-    // @Description: Minimum speed-PID I-term magnitude (0-1 throttle fraction) accepted as a valid drift sample; below this there is nothing to compensate    
-    // @Range: 0 0.5    
-    // @User: Advanced    
-    AP_GROUPINFO("LOIT_I_MIN", 33, AP_MotorsUGV, _loit_i_min, 0.02f),  
-  
-    // @Param: LOIT_I_ALPHA    
-    // @DisplayName: Loiter drift method-2 EMA alpha    
-    // @Description: EMA weight applied to each I-term sample during the equilibrium window; lower = smoother but slower    
-    // @Range: 0.01 1.0    
-    // @User: Advanced    
-    AP_GROUPINFO("LOIT_I_ALPHA", 34, AP_MotorsUGV, _loit_i_alpha, 0.10f),  
-  
-    // @Param: LOIT_I_DISAG    
-    // @DisplayName: Loiter drift method-2 disagreement gate    
-    // @Description: If a new estimate differs from the stored one by more than this fraction of its magnitude, blend only 25% of the way (NAV-style trend check)    
-    // @Range: 0.1 2.0    
-    // @User: Advanced    
-    AP_GROUPINFO("LOIT_I_DISAG", 35, AP_MotorsUGV, _loit_i_disagree, 0.5f),    
-  
-    // @Param: LOIT_ROT_ANG      
-    // @DisplayName: Loiter drift method-1 rotation angle gate      
-    // @Description: Vectored-thruster deflection (deg) above which coast drift sampling is blocked. Rotating the hull about its pivot point produces real lateral IMU velocity (v = yaw_rate * pivot_radius) that would be misread as drift. 0 disables the gate      
-    // @Units: deg      
-    // @Range: 0 90      
-    // @User: Advanced      
-    AP_GROUPINFO("LOIT_ROT_ANG", 36, AP_MotorsUGV, _loit_rot_ang_deg, 15.0f),    
-  
-    // @Param: LOIT_ROT_RATE      
-    // @DisplayName: Loiter drift method-1 yaw rate gate      
-    // @Description: Yaw rate (deg/s) above which coast drift sampling is blocked. During rotation the IMU orbits the pivot point (~0.6m) - e.g. 45deg/s = ~0.5m/s false drift. 0 disables the gate      
-    // @Units: deg/s      
-    // @Range: 0 90      
-    // @User: Advanced      
-    AP_GROUPINFO("LOIT_ROT_RATE", 37, AP_MotorsUGV, _loit_rot_rate_dps, 20.0f),    
-  
-    // @Param: DRIFT_EST_YAWR      
-    // @DisplayName: Nav drift estimator yaw rate gate      
-    // @Description: Yaw rate (deg/s) above which the shared drift-estimator window (navigate_to_waypoint/Guided) is invalidated. Keep tighter than LOIT_ROT_RATE - the estimator needs long clean windows, not sample count      
-    // @Units: deg/s      
-    // @Range: 0 45      
-    // @User: Advanced      
-    AP_GROUPINFO("DRIFT_EST_YAWR", 38, AP_MotorsUGV, _drift_est_yaw_rate_dps, 15.0f),    
-  
-    AP_GROUPEND    
+    // @Units: s
+    // @Range: 0 3600
+    // @User: Advanced
+    AP_GROUPINFO("DRIFT_MAXAGE", 25, AP_MotorsUGV, _drift_max_age_s, 1800.0f),
+
+    // @Param: SFL_DB
+    // @DisplayName: Steering-floor deadband
+    // @Description: Heading error (deg) below which the vectored-thrust steering-to-throttle floor injects no throttle
+    // @Units: deg
+    // @Range: 0 45
+    // @User: Advanced
+    AP_GROUPINFO("SFL_DB", 26, AP_MotorsUGV, _sfl_deadband_deg, 10.0f),
+
+    // @Param: SFL_GAIN
+    // @DisplayName: Steering-floor gain
+    // @Description: Floor throttle percent per degree of heading error above the deadband
+    // @Units: %/deg
+    // @Range: 0 5
+    // @User: Advanced
+    AP_GROUPINFO("SFL_GAIN", 27, AP_MotorsUGV, _sfl_gain, 0.7f),
+
+    // @Param: SFL_MAX
+    // @DisplayName: Steering-floor maximum
+    // @Description: Maximum throttle percent the steering-floor is allowed to inject
+    // @Units: %
+    // @Range: 0 50
+    // @User: Advanced
+    AP_GROUPINFO("SFL_MAX", 28, AP_MotorsUGV, _sfl_max_pct, 20.0f),
+
+    // @Param: SFL_IFRZ
+    // @DisplayName: Steering-floor I-term freeze threshold
+    // @Description: Heading error (deg) above which the speed PID integrator is frozen to prevent windup while rotating in place
+    // @Units: deg
+    // @Range: 10 90
+    // @User: Advanced
+    AP_GROUPINFO("SFL_IFRZ", 29, AP_MotorsUGV, _sfl_ifreeze_deg, 45.0f),
+
+    // @Param: LOIT_DRF_MIN
+    // @DisplayName: Loiter drift minimum magnitude
+    // @Description: Drift estimate (m/s) below which the loiter anti-drift heading is not activated; deadband against GPS/estimate noise
+    // @Units: m/s
+    // @Range: 0 0.5
+    // @User: Advanced
+    AP_GROUPINFO("LOIT_DRF_MIN", 30, AP_MotorsUGV, _loit_drift_min, 0.03f),
+
+    // @Param: LOIT_CST_THR
+    // @DisplayName: Loiter coasting throttle threshold
+    // @Description: Pre-floor navigation throttle demand (%) below which the vehicle is considered coasting for method-1 drift sampling
+    // @Units: %
+    // @Range: 0 10
+    // @User: Advanced
+    AP_GROUPINFO("LOIT_CST_THR", 31, AP_MotorsUGV, _loit_coast_thr, 1.0f),
+
+    // @Param: LOIT_I_EQERR
+    // @DisplayName: Loiter drift method-2 equilibrium error
+    // @Description: Speed-PID error (m/s) below which the I-term is considered at drift equilibrium during the decel-to-stop window
+    // @Units: m/s
+    // @Range: 0 0.5
+    // @User: Advanced
+    AP_GROUPINFO("LOIT_I_EQERR", 32, AP_MotorsUGV, _loit_i_eq_err, 0.10f),
+
+    // @Param: LOIT_I_MIN
+    // @DisplayName: Loiter drift method-2 minimum I-term
+    // @Description: Minimum speed-PID I-term magnitude (0-1 throttle fraction) accepted as a valid drift sample; below this there is nothing to compensate
+    // @Range: 0 0.5
+    // @User: Advanced
+    AP_GROUPINFO("LOIT_I_MIN", 33, AP_MotorsUGV, _loit_i_min, 0.02f),
+
+    // @Param: LOIT_I_ALPHA
+    // @DisplayName: Loiter drift method-2 EMA alpha
+    // @Description: EMA weight applied to each I-term sample during the equilibrium window; lower = smoother but slower
+    // @Range: 0.01 1.0
+    // @User: Advanced
+    AP_GROUPINFO("LOIT_I_ALPHA", 34, AP_MotorsUGV, _loit_i_alpha, 0.10f),
+
+    // @Param: LOIT_I_DISAG
+    // @DisplayName: Loiter drift method-2 disagreement gate
+    // @Description: If a new estimate differs from the stored one by more than this fraction of its magnitude, blend only 25% of the way (NAV-style trend check)
+    // @Range: 0.1 2.0
+    // @User: Advanced
+    AP_GROUPINFO("LOIT_I_DISAG", 35, AP_MotorsUGV, _loit_i_disagree, 0.5f),
+
+    // @Param: LOIT_ROT_ANG
+    // @DisplayName: Loiter drift method-1 rotation angle gate
+    // @Description: Vectored-thruster deflection (deg) above which coast drift sampling is blocked. Rotating the hull about its pivot point produces real lateral IMU velocity (v = yaw_rate * pivot_radius) that would be misread as drift. 0 disables the gate
+    // @Units: deg
+    // @Range: 0 90
+    // @User: Advanced
+    AP_GROUPINFO("LOIT_ROT_ANG", 36, AP_MotorsUGV, _loit_rot_ang_deg, 15.0f),
+
+    // @Param: LOIT_ROT_RAT
+    // @DisplayName: Loiter drift method-1 yaw rate gate
+    // @Description: Yaw rate (deg/s) above which coast drift sampling is blocked. During rotation the IMU orbits the pivot point (~0.6m) - e.g. 45deg/s = ~0.5m/s false drift. 0 disables the gate
+    // @Units: deg/s
+    // @Range: 0 90
+    // @User: Advanced
+    AP_GROUPINFO("LOIT_ROT_RAT", 37, AP_MotorsUGV, _loit_rot_rate_dps, 20.0f),
+
+    // @Param: DRIFT_EST_YR
+    // @DisplayName: Nav drift estimator yaw rate gate
+    // @Description: Yaw rate (deg/s) above which the shared drift-estimator window (navigate_to_waypoint/Guided) is invalidated. Keep tighter than LOIT_ROT_RAT - the estimator needs long clean windows, not sample count
+    // @Units: deg/s
+    // @Range: 0 45
+    // @User: Advanced
+    AP_GROUPINFO("DRIFT_EST_YR", 38, AP_MotorsUGV, _drift_est_yaw_rate_dps, 15.0f),
+
+    AP_GROUPEND
 };
 
-AP_MotorsUGV::AP_MotorsUGV(AP_WheelRateControl& rate_controller) :  
-    _rate_controller(rate_controller)  
-{  
-    AP_Param::setup_object_defaults(this, var_info);  
-    _singleton = this;  
-    _loiter_estimate_ne.zero();  
-    _loiter_estimate_ms = 0;  
-    _nav_estimate_ne.zero();  
-    _nav_estimate_ms = 0;  
-    _loiter_estimate_is_seeded = false;  
+AP_MotorsUGV::AP_MotorsUGV(AP_WheelRateControl& rate_controller) :
+    _rate_controller(rate_controller)
+{
+    AP_Param::setup_object_defaults(this, var_info);
+    _singleton = this;
+    _loiter_estimate_ne.zero();
+    _loiter_estimate_ms = 0;
+    _nav_estimate_ne.zero();
+    _nav_estimate_ms = 0;
+    _loiter_estimate_is_seeded = false;
     _nav_estimate_is_seeded = false;
     _vec_throttle_filt = 0.0f;
-    _vec_steering_filt = 0.0f;	
+    _vec_steering_filt = 0.0f;
     _vec_last_steering_angle_rad = 0.0f;
     _vec_last_w = 1.0f;
 }
 
-// set a Loiter-sourced current+wind drift estimate (m/s, North/East).  gain  
-// (DRIFT_GAIN_LOIT) applied here, at write-time, so the stored  
-// value is already the final, PID-ready corrected vector  
-void AP_MotorsUGV::set_loiter_estimate_ne(const Vector2f &drift_ne)  
-{  
-    const float gain = constrain_float(_drift_comp_gain_loiter, 0.0f, 2.0f);  
-    _loiter_estimate_ne = drift_ne * gain;  
-    _loiter_estimate_ms = AP_HAL::millis();  
-    _loiter_estimate_is_seeded = false;  
+// set a Loiter-sourced current+wind drift estimate (m/s, North/East).  gain
+// (DRIFT_G_LOIT) applied here, at write-time, so the stored
+// value is already the final, PID-ready corrected vector
+void AP_MotorsUGV::set_loiter_estimate_ne(const Vector2f &drift_ne)
+{
+    const float gain = constrain_float(_drift_comp_gain_loiter, 0.0f, 2.0f);
+    _loiter_estimate_ne = drift_ne * gain;
+    _loiter_estimate_ms = AP_HAL::millis();
+    _loiter_estimate_is_seeded = false;
 }
-  
-// set a Guided-sourced current+wind drift estimate (m/s, North/East).  gain  
-// (DRIFT_GAIN_NAV) applied here, at write-time, so the stored  
-// value is already the final, PID-ready corrected vector  
-void AP_MotorsUGV::set_nav_estimate_ne(const Vector2f &drift_ne)  
-{  
-    const float gain = constrain_float(_drift_comp_gain_nav, 0.0f, 2.0f);  
-    _nav_estimate_ne = drift_ne * gain;  
-    _nav_estimate_ms = AP_HAL::millis();  
-    _nav_estimate_is_seeded = false;  
-} 
-  
-// seed the Loiter slot - source_ms preserves the original measurement time    
-void AP_MotorsUGV::seed_loiter_estimate_ne(const Vector2f &drift_ne, uint32_t source_ms)    
-{    
-    _loiter_estimate_ne = drift_ne;    
-    _loiter_estimate_ms = source_ms;    
-    _loiter_estimate_is_seeded = true;    
-}  
-  
-// seed the nav/Guided slot - source_ms preserves the original measurement time    
-void AP_MotorsUGV::seed_nav_estimate_ne(const Vector2f &drift_ne, uint32_t source_ms)    
-{    
-    _nav_estimate_ne = drift_ne;    
-    _nav_estimate_ms = source_ms;    
-    _nav_estimate_is_seeded = true;    
+
+// set a Guided-sourced current+wind drift estimate (m/s, North/East).  gain
+// (DRIFT_G_NAV) applied here, at write-time, so the stored
+// value is already the final, PID-ready corrected vector
+void AP_MotorsUGV::set_nav_estimate_ne(const Vector2f &drift_ne)
+{
+    const float gain = constrain_float(_drift_comp_gain_nav, 0.0f, 2.0f);
+    _nav_estimate_ne = drift_ne * gain;
+    _nav_estimate_ms = AP_HAL::millis();
+    _nav_estimate_is_seeded = false;
 }
-  
-bool AP_MotorsUGV::get_loiter_estimate_ne(Vector2f &drift_ne, uint32_t &age_ms, bool &is_seeded) const  
-{  
-    if (_loiter_estimate_ms == 0) {  
-        return false;  
-    }  
-    age_ms = AP_HAL::millis() - _loiter_estimate_ms;  
-    drift_ne = _loiter_estimate_ne;  
-    is_seeded = _loiter_estimate_is_seeded;  
-    return true;  
-}  
-  
-// raw Guided-sourced estimate + age (ms). false if never set  
-bool AP_MotorsUGV::get_nav_estimate_ne(Vector2f &drift_ne, uint32_t &age_ms, bool &is_seeded) const  
-{  
-    if (_nav_estimate_ms == 0) {  
-        return false;  
-    }  
-    age_ms = AP_HAL::millis() - _nav_estimate_ms;  
-    drift_ne = _nav_estimate_ne;  
-    is_seeded = _nav_estimate_is_seeded;  
-    return true;  
-} 
-  
-// return the more recently-updated of the two per-source drift estimates  
-// (gain already applied at write-time in set_loiter_estimate_ne()/  
-// set_nav_estimate_ne()).  returns false if neither source has ever been  
-// set, or if the newer of the two is older than DRIFT_MAXAGE seconds  
-// (correction fully off - e.g. wind/current stopped being measured)  
-bool AP_MotorsUGV::get_current_estimate_ne(Vector2f &current_ne) const  
-{  
-    const uint32_t now_ms = AP_HAL::millis();  
-  
-    const uint32_t loiter_age_ms = (_loiter_estimate_ms == 0) ? UINT32_MAX : (now_ms - _loiter_estimate_ms);  
-    const uint32_t nav_age_ms = (_nav_estimate_ms == 0) ? UINT32_MAX : (now_ms - _nav_estimate_ms);  
-  
-    if ((loiter_age_ms == UINT32_MAX) && (nav_age_ms == UINT32_MAX)) {  
-        // neither source has ever provided a sample  
-        return false;  
-    }  
-  
-    // a seeded estimate is only a handoff placeholder, not a real measurement -  
-    // a genuinely-measured estimate always wins over a seeded one regardless  
-    // of timestamp. between two seeds or two real samples, newer wins.  
-    const bool loiter_real = (loiter_age_ms != UINT32_MAX) && !_loiter_estimate_is_seeded;  
-    const bool nav_real    = (nav_age_ms    != UINT32_MAX) && !_nav_estimate_is_seeded;  
-  
-    bool use_loiter;  
-    if (loiter_real && !nav_real) {  
-        use_loiter = true;  
-    } else if (nav_real && !loiter_real) {  
-        use_loiter = false;  
-    } else {  
-        use_loiter = loiter_age_ms <= nav_age_ms;  
-    }  
-    const uint32_t chosen_age_ms = use_loiter ? loiter_age_ms : nav_age_ms;  
-  
-    if (!is_positive(_drift_max_age_s) || (chosen_age_ms > uint32_t(_drift_max_age_s * 1000.0f))) {    
-        // shared staleness cutoff: neither source is recent enough to trust    
-        return false;    
-    }    
-    
-    current_ne = use_loiter ? _loiter_estimate_ne : _nav_estimate_ne;    
+
+// seed the Loiter slot - source_ms preserves the original measurement time
+void AP_MotorsUGV::seed_loiter_estimate_ne(const Vector2f &drift_ne, uint32_t source_ms)
+{
+    _loiter_estimate_ne = drift_ne;
+    _loiter_estimate_ms = source_ms;
+    _loiter_estimate_is_seeded = true;
+}
+
+// seed the nav/Guided slot - source_ms preserves the original measurement time
+void AP_MotorsUGV::seed_nav_estimate_ne(const Vector2f &drift_ne, uint32_t source_ms)
+{
+    _nav_estimate_ne = drift_ne;
+    _nav_estimate_ms = source_ms;
+    _nav_estimate_is_seeded = true;
+}
+
+bool AP_MotorsUGV::get_loiter_estimate_ne(Vector2f &drift_ne, uint32_t &age_ms, bool &is_seeded) const
+{
+    if (_loiter_estimate_ms == 0) {
+        return false;
+    }
+    age_ms = AP_HAL::millis() - _loiter_estimate_ms;
+    drift_ne = _loiter_estimate_ne;
+    is_seeded = _loiter_estimate_is_seeded;
+    return true;
+}
+
+// raw Guided-sourced estimate + age (ms). false if never set
+bool AP_MotorsUGV::get_nav_estimate_ne(Vector2f &drift_ne, uint32_t &age_ms, bool &is_seeded) const
+{
+    if (_nav_estimate_ms == 0) {
+        return false;
+    }
+    age_ms = AP_HAL::millis() - _nav_estimate_ms;
+    drift_ne = _nav_estimate_ne;
+    is_seeded = _nav_estimate_is_seeded;
+    return true;
+}
+
+// return the more recently-updated of the two per-source drift estimates
+// (gain already applied at write-time in set_loiter_estimate_ne()/
+// set_nav_estimate_ne()).  returns false if neither source has ever been
+// set, or if the newer of the two is older than DRIFT_MAXAGE seconds
+// (correction fully off - e.g. wind/current stopped being measured)
+bool AP_MotorsUGV::get_current_estimate_ne(Vector2f &current_ne) const
+{
+    const uint32_t now_ms = AP_HAL::millis();
+
+    const uint32_t loiter_age_ms = (_loiter_estimate_ms == 0) ? UINT32_MAX : (now_ms - _loiter_estimate_ms);
+    const uint32_t nav_age_ms = (_nav_estimate_ms == 0) ? UINT32_MAX : (now_ms - _nav_estimate_ms);
+
+    if ((loiter_age_ms == UINT32_MAX) && (nav_age_ms == UINT32_MAX)) {
+        // neither source has ever provided a sample
+        return false;
+    }
+
+    // a seeded estimate is only a handoff placeholder, not a real measurement -
+    // a genuinely-measured estimate always wins over a seeded one regardless
+    // of timestamp. between two seeds or two real samples, newer wins.
+    const bool loiter_real = (loiter_age_ms != UINT32_MAX) && !_loiter_estimate_is_seeded;
+    const bool nav_real    = (nav_age_ms    != UINT32_MAX) && !_nav_estimate_is_seeded;
+
+    bool use_loiter;
+    if (loiter_real && !nav_real) {
+        use_loiter = true;
+    } else if (nav_real && !loiter_real) {
+        use_loiter = false;
+    } else {
+        use_loiter = loiter_age_ms <= nav_age_ms;
+    }
+    const uint32_t chosen_age_ms = use_loiter ? loiter_age_ms : nav_age_ms;
+
+    if (!is_positive(_drift_max_age_s) || (chosen_age_ms > uint32_t(_drift_max_age_s * 1000.0f))) {
+        // shared staleness cutoff: neither source is recent enough to trust
+        return false;
+    }
+
+    current_ne = use_loiter ? _loiter_estimate_ne : _nav_estimate_ne;
     return true;
 }
 
@@ -1002,17 +1002,17 @@ void AP_MotorsUGV::output_regular(bool armed, float ground_speed, float steering
                 // normalise desired steering and throttle to ease calculations
                 const float steering_norm = steering / 4500.0f;
                 const float throttle_norm = throttle * 0.01f;
-                const float vector_angle_max_rad = radians(constrain_float(_vector_angle_max, 0.0f, 90.0f));  
-  
+                const float vector_angle_max_rad = radians(constrain_float(_vector_angle_max, 0.0f, 90.0f));
+
                 // low-pass filter throttle to distinguish sudden step commands from
                 // steady-state near-zero throttle, where atan() amplifies noise
-                if (is_positive(_vec_resid_tc)) {  
-                    const float alpha = constrain_float(dt / (_vec_resid_tc + dt), 0.0f, 1.0f);  
-                    _vec_throttle_filt += (throttle_norm - _vec_throttle_filt) * alpha;  
-                    _vec_steering_filt += (steering_norm - _vec_steering_filt) * alpha;  
-                } else {  
-                    _vec_throttle_filt = throttle_norm;  
-                    _vec_steering_filt = steering_norm;  
+                if (is_positive(_vec_resid_tc)) {
+                    const float alpha = constrain_float(dt / (_vec_resid_tc + dt), 0.0f, 1.0f);
+                    _vec_throttle_filt += (throttle_norm - _vec_throttle_filt) * alpha;
+                    _vec_steering_filt += (steering_norm - _vec_steering_filt) * alpha;
+                } else {
+                    _vec_throttle_filt = throttle_norm;
+                    _vec_steering_filt = steering_norm;
                 }
 
                 // steering can never be more than filtered-throttle * tan(_vector_angle_max)
@@ -1033,34 +1033,34 @@ void AP_MotorsUGV::output_regular(bool armed, float ground_speed, float steering
                 float w = 1.0f;   // blend weight: 1 = pure direct/quadrant mapping, 0 = legacy full atan()
                 float steering_angle_rad;
 
-                if (vec_mag < _vec_deadband) {  
-                    // both steering and throttle demand are negligible: freeze angle  
-                    // (and blend weight) to suppress jitter instead of letting atan()  
-                    // amplify noise, and so the throttle-boost stays consistent with  
-                    // whatever regime (direct vs. atan) was active just before freezing  
-                    steering_angle_rad = _vec_last_steering_angle_rad;  
-                    w = _vec_last_w;  
+                if (vec_mag < _vec_deadband) {
+                    // both steering and throttle demand are negligible: freeze angle
+                    // (and blend weight) to suppress jitter instead of letting atan()
+                    // amplify noise, and so the throttle-boost stays consistent with
+                    // whatever regime (direct vs. atan) was active just before freezing
+                    steering_angle_rad = _vec_last_steering_angle_rad;
+                    w = _vec_last_w;
                 } else {
                     // direct/quadrant-based angle: proportional to steering demand only,
                     // sign-folded for reverse throttle so the thruster points the correct way
-					float direct_angle_rad = constrain_float(steering_norm, -1.0f, 1.0f) * vector_angle_max_rad;  
-					// use the raw (unfiltered) throttle sign so the vector flips at the same instant  
-					// the actual commanded throttle crosses zero, not delayed by the low-pass filter  
-					if (is_negative(throttle_norm)) {  
-					direct_angle_rad = -direct_angle_rad;  
+					float direct_angle_rad = constrain_float(steering_norm, -1.0f, 1.0f) * vector_angle_max_rad;
+					// use the raw (unfiltered) throttle sign so the vector flips at the same instant
+					// the actual commanded throttle crosses zero, not delayed by the low-pass filter
+					if (is_negative(throttle_norm)) {
+					direct_angle_rad = -direct_angle_rad;
 					}
 
                     // legacy atan()-based angle, guarded against divide-by-zero
-					float atan_angle_rad = 0.0f;  
-					if (!is_zero(_vec_throttle_filt)) {  
-						// magnitude from the filtered throttle (noise suppression), but sign forced  
-						// to match the raw/unfiltered throttle so reversal timing isn't lagged  
-						const float atan_denom = is_negative(throttle_norm) ? -fabsf(_vec_throttle_filt) : fabsf(_vec_throttle_filt);  
-						atan_angle_rad = atanf(atan_steering_norm / atan_denom);  
+					float atan_angle_rad = 0.0f;
+					if (!is_zero(_vec_throttle_filt)) {
+						// magnitude from the filtered throttle (noise suppression), but sign forced
+						// to match the raw/unfiltered throttle so reversal timing isn't lagged
+						const float atan_denom = is_negative(throttle_norm) ? -fabsf(_vec_throttle_filt) : fabsf(_vec_throttle_filt);
+						atan_angle_rad = atanf(atan_steering_norm / atan_denom);
 					}
 
                     // blend weight from filtered throttle magnitude: w=1 near zero throttle
-                    // (direct mapping), w=0 at/above VEC_BLEND_THR (legacy atan() mapping)
+                    // (direct mapping), w=0 at/above VEC_BLND_THR (legacy atan() mapping)
                     if (is_positive(_vec_blend_thr)) {
                         w = 1.0f - constrain_float(fabsf(_vec_throttle_filt) / _vec_blend_thr, 0.0f, 1.0f);
                     } else {
@@ -1075,8 +1075,8 @@ void AP_MotorsUGV::output_regular(bool armed, float ground_speed, float steering
                         limit.steer_left = true;
                     }
 
-                    _vec_last_steering_angle_rad = steering_angle_rad;  
-                    _vec_last_w = w;  
+                    _vec_last_steering_angle_rad = steering_angle_rad;
+                    _vec_last_w = w;
                 }
 
                 // convert steering angle to steering output
