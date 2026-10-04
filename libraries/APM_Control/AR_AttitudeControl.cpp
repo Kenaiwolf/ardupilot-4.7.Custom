@@ -18,7 +18,6 @@
 #include <AP_HAL/AP_HAL.h>
 #include "AR_AttitudeControl.h"
 #include <AP_GPS/AP_GPS.h>
-#include <AP_GPS/AP_GPS_FixType.h>
 
 // attitude control default definition
 #define AR_ATTCONTROL_STEER_ANG_P       2.00f
