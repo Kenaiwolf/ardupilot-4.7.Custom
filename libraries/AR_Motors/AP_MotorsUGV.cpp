@@ -197,8 +197,7 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
 
     // @Param: SFL_GAIN
     // @DisplayName: Steering-floor gain
-    // @Description: Floor throttle percent per degree of heading error above the deadband
-    // @Units: %/deg
+    // @Description: Floor throttle percent per degree of heading error above the deadband [%/deg]
     // @Range: 0 5
     // @User: Advanced
     AP_GROUPINFO("SFL_GAIN", 27, AP_MotorsUGV, _sfl_gain, 0.7f),
