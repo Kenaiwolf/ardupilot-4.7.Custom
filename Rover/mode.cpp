@@ -837,8 +837,9 @@ void Mode::set_steering(float steering_value)
         steering_value = channel_steer->stick_mixing((int16_t)constrain_float(steering_value, -4500.0f, 4500.0f));
     }
     // assert nav context so the motors layer can apply autopilot-only limits
-    // (e.g. no autonomous reverse); manual modes leave it false
-    g2.motors.set_nav_context(allows_stick_mixing());
+    // (e.g. no autonomous reverse); Manual bypasses this path entirely,
+    // Acro/Steering report has_manual_input() and keep it false
+    g2.motors.set_nav_context(!has_manual_input());
     // any steering demand through this path is closed-loop (PID-shaped);
     // Manual bypasses Mode::set_steering entirely and leaves it false
     g2.motors.set_pid_steering(true);
