@@ -842,6 +842,9 @@ void Mode::set_steering(float steering_value)
     // any steering demand through this path is closed-loop (PID-shaped);
     // Manual bypasses Mode::set_steering entirely and leaves it false
     g2.motors.set_pid_steering(true);
+    // propagate the configured turn-rate ceiling so vectored_allocate's
+    // rotation-brake scaling tracks ATC_STR_RAT_MAX without a hardcode
+    g2.motors.set_yaw_rate_max_rads(radians(g2.attitude_control.get_steer_rate_max_degs()));
     g2.motors.set_steering(steering_value);
 }
 
