@@ -433,6 +433,9 @@ bool AP_MotorsUGV::get_current_estimate_ne(Vector2f &current_ne) const
 void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_speed,
                                      bool nav_mode, float &steering_cd, float &throttle_pct, float dt)
 {
+    // measured yaw rate (rad/s, earth frame = body yaw rate on a boat)
+    const float yaw_rate_rads = AP::ahrs().get_yaw_rate_earth();
+
     // policy gate: autonomous reverse allowed only while still moving forward
     // (active braking). reuses LOIT_DRF_MIN magnitude as the rest-speed threshold.
     // reverse at saturated deflection is rotation braking, not stern travel, and
@@ -493,6 +496,22 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // must be negative at the folded angle to keep the same vector
         if (is_negative(_vec_throttle_filt) && is_positive(throttle_norm)) {
             throttle_norm = -throttle_norm;
+        }
+
+        // rotation brake: servo at full deflection AND PID demands rotation
+        // opposite to the measured yaw rate -> hull carries angular momentum
+        // that closing the angle cannot remove. hold the angle, command T<0
+        // (counter-torque), scaled by |omega| relative to the measured pivot
+        // rate (~24 deg/s) and derated by the measured reverse efficiency
+        // (ATC_DECEL_MAX/ATC_ACCEL_MAX = 0.8). braking != stern travel, so the
+        // nav_mode reverse gate does not apply to this path
+        if (nav_mode &&
+            fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
+            (_vec_steering_filt * yaw_rate_rads) < 0.0f) {
+            const float yaw_rate_max = radians(24.0f);
+            const float reverse_eff = 0.8f;
+            const float brake_frac = constrain_float(fabsf(yaw_rate_rads) / yaw_rate_max, 0.2f, 1.0f);
+            throttle_norm = -fabsf(throttle_norm) * brake_frac * reverse_eff;
         }
 
         if (fabsf(steering_angle_rad) >= vector_angle_max_rad) {
