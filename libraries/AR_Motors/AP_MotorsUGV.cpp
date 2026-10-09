@@ -423,109 +423,108 @@ bool AP_MotorsUGV::get_current_estimate_ne(Vector2f &current_ne) const
 // reverse thrust is allowed only as braking while the vehicle is still moving
 // forward; at rest, fx_req<0 is clamped to zero and all energy goes to n_req
 // (pivot) - a boat must never autonomously back stern-first into waves/current.
-// currently a passthrough skeleton (dead code): allocation logic lands in step 2.
-// unified vectored-thrust allocator (VEC_ALLOC=1). step-2 replica: performs the  
-// identical blend math that output_regular() runs in its legacy branch, moved  
-// here verbatim so both paths stay bit-identical. (fx_req, n_req) semantics and  
-// the no-autonomous-reverse policy gate are applied on top.  
-void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_speed,  
-                                     bool nav_mode, float &steering_cd, float &throttle_pct, float dt)  
-{  
-    // policy gate: autonomous reverse allowed only while still moving forward  
-    // (active braking). reuses LOIT_DRF_MIN magnitude as the rest-speed threshold  
-    if (nav_mode && is_negative(fx_req) && (ground_speed <= _loit_drift_min)) {  
-        fx_req = 0.0f;  
-    }  
-  
-    const float steering_norm = constrain_float(n_req, -1.0f, 1.0f);  
-    const float throttle_norm = constrain_float(fx_req, -1.0f, 1.0f);  
-    const float vector_angle_max_rad = radians(constrain_float(_vector_angle_max, 0.0f, 90.0f));  
-  
-    // low-pass filter throttle to distinguish sudden step commands from  
-    // steady-state near-zero throttle, where atan() amplifies noise  
-    if (is_positive(_vec_resid_tc)) {  
-        const float alpha = constrain_float(dt / (_vec_resid_tc + dt), 0.0f, 1.0f);  
-        _vec_throttle_filt += (throttle_norm - _vec_throttle_filt) * alpha;  
-        _vec_steering_filt += (steering_norm - _vec_steering_filt) * alpha;  
-    } else {  
-        _vec_throttle_filt = throttle_norm;  
-        _vec_steering_filt = steering_norm;  
-    }  
-  
-    // steering can never be more than filtered-throttle * tan(_vector_angle_max)  
-    const float steering_norm_lim = fabsf(_vec_throttle_filt * tanf(vector_angle_max_rad));  
-    float atan_steering_norm = steering_norm;  
-    if (fabsf(atan_steering_norm) > steering_norm_lim) {  
-        if (is_positive(atan_steering_norm)) {  
-            atan_steering_norm = steering_norm_lim;  
-        } else {  
-            atan_steering_norm = -steering_norm_lim;  
-        }  
-        limit.steer_right = true;  
-        limit.steer_left = true;  
-    }  
-  
-    const float vec_mag = sqrtf(sq(_vec_steering_filt) + sq(_vec_throttle_filt));  
-  
-    float w = 1.0f;   // blend weight: 1 = pure direct/quadrant mapping, 0 = legacy full atan()  
-    float steering_angle_rad;  
-  
-    if (vec_mag < _vec_deadband) {  
-        // both steering and throttle demand are negligible: freeze angle  
-        // (and blend weight) to suppress jitter instead of letting atan()  
-        // amplify noise, and so the throttle-boost stays consistent with  
-        // whatever regime (direct vs. atan) was active just before freezing  
-        steering_angle_rad = _vec_last_steering_angle_rad;  
-        w = _vec_last_w;  
-    } else {  
-        // direct/quadrant-based angle: proportional to steering demand only,  
-        // sign-folded for reverse throttle so the thruster points the correct way  
-        float direct_angle_rad = constrain_float(steering_norm, -1.0f, 1.0f) * vector_angle_max_rad;  
-        // use the raw (unfiltered) throttle sign so the vector flips at the same instant  
-        // the actual commanded throttle crosses zero, not delayed by the low-pass filter  
-        if (is_negative(throttle_norm)) {  
-            direct_angle_rad = -direct_angle_rad;  
-        }  
-  
-        // legacy atan()-based angle, guarded against divide-by-zero  
-        float atan_angle_rad = 0.0f;  
-        if (!is_zero(_vec_throttle_filt)) {  
-            // magnitude from the filtered throttle (noise suppression), but sign forced  
-            // to match the raw/unfiltered throttle so reversal timing isn't lagged  
-            const float atan_denom = is_negative(throttle_norm) ? -fabsf(_vec_throttle_filt) : fabsf(_vec_throttle_filt);  
-            atan_angle_rad = atanf(atan_steering_norm / atan_denom);  
-        }  
-  
-        // blend weight from filtered throttle magnitude: w=1 near zero throttle  
-        // (direct mapping), w=0 at/above VEC_BLND_THR (legacy atan() mapping)  
-        if (is_positive(_vec_blend_thr)) {  
-            w = 1.0f - constrain_float(fabsf(_vec_throttle_filt) / _vec_blend_thr, 0.0f, 1.0f);  
-        } else {  
-            w = 0.0f;  
-        }  
-  
-        steering_angle_rad = w * direct_angle_rad + (1.0f - w) * atan_angle_rad;  
-  
-        if (fabsf(steering_angle_rad) > vector_angle_max_rad) {  
-            steering_angle_rad = constrain_float(steering_angle_rad, -vector_angle_max_rad, vector_angle_max_rad);  
-            limit.steer_right = true;  
-            limit.steer_left = true;  
-        }  
-  
-        _vec_last_steering_angle_rad = steering_angle_rad;  
-        _vec_last_w = w;  
-    }  
-  
-    // convert steering angle to steering output (centidegrees)  
-    steering_cd = steering_angle_rad / vector_angle_max_rad * 4500.0f;  
-  
-    // scale up throttle to compensate for steering angle, blended by the same w  
-    // computed above: w=1 -> no boost, w=0 -> full cos() boost (legacy)  
-    const float throttle_scaler_inv = w + (1.0f - w) * cosf(steering_angle_rad);  
-    throttle_pct = throttle_norm * 100.0f;  
-    if (!is_zero(throttle_scaler_inv)) {  
-        throttle_pct /= throttle_scaler_inv;  
-    }  
+// unified vectored-thrust allocator (VEC_ALLOC=1). step-2 replica: performs the
+// identical blend math that output_regular() runs in its legacy branch, moved
+// here verbatim so both paths stay bit-identical. (fx_req, n_req) semantics and
+// the no-autonomous-reverse policy gate are applied on top.
+void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_speed,
+                                     bool nav_mode, float &steering_cd, float &throttle_pct, float dt)
+{
+    // policy gate: autonomous reverse allowed only while still moving forward
+    // (active braking). reuses LOIT_DRF_MIN magnitude as the rest-speed threshold
+    if (nav_mode && is_negative(fx_req) && (ground_speed <= _loit_drift_min)) {
+        fx_req = 0.0f;
+    }
+
+    const float steering_norm = constrain_float(n_req, -1.0f, 1.0f);
+    const float throttle_norm = constrain_float(fx_req, -1.0f, 1.0f);
+    const float vector_angle_max_rad = radians(constrain_float(_vector_angle_max, 0.0f, 90.0f));
+
+    // low-pass filter throttle to distinguish sudden step commands from
+    // steady-state near-zero throttle, where atan() amplifies noise
+    if (is_positive(_vec_resid_tc)) {
+        const float alpha = constrain_float(dt / (_vec_resid_tc + dt), 0.0f, 1.0f);
+        _vec_throttle_filt += (throttle_norm - _vec_throttle_filt) * alpha;
+        _vec_steering_filt += (steering_norm - _vec_steering_filt) * alpha;
+    } else {
+        _vec_throttle_filt = throttle_norm;
+        _vec_steering_filt = steering_norm;
+    }
+
+    // steering can never be more than filtered-throttle * tan(_vector_angle_max)
+    const float steering_norm_lim = fabsf(_vec_throttle_filt * tanf(vector_angle_max_rad));
+    float atan_steering_norm = steering_norm;
+    if (fabsf(atan_steering_norm) > steering_norm_lim) {
+        if (is_positive(atan_steering_norm)) {
+            atan_steering_norm = steering_norm_lim;
+        } else {
+            atan_steering_norm = -steering_norm_lim;
+        }
+        limit.steer_right = true;
+        limit.steer_left = true;
+    }
+
+    const float vec_mag = sqrtf(sq(_vec_steering_filt) + sq(_vec_throttle_filt));
+
+    float w = 1.0f;   // blend weight: 1 = pure direct/quadrant mapping, 0 = legacy full atan()
+    float steering_angle_rad;
+
+    if (vec_mag < _vec_deadband) {
+        // both steering and throttle demand are negligible: freeze angle
+        // (and blend weight) to suppress jitter instead of letting atan()
+        // amplify noise, and so the throttle-boost stays consistent with
+        // whatever regime (direct vs. atan) was active just before freezing
+        steering_angle_rad = _vec_last_steering_angle_rad;
+        w = _vec_last_w;
+    } else {
+        // direct/quadrant-based angle: proportional to steering demand only,
+        // sign-folded for reverse throttle so the thruster points the correct way
+        float direct_angle_rad = constrain_float(steering_norm, -1.0f, 1.0f) * vector_angle_max_rad;
+        // use the raw (unfiltered) throttle sign so the vector flips at the same instant
+        // the actual commanded throttle crosses zero, not delayed by the low-pass filter
+        if (is_negative(throttle_norm)) {
+            direct_angle_rad = -direct_angle_rad;
+        }
+
+        // legacy atan()-based angle, guarded against divide-by-zero
+        float atan_angle_rad = 0.0f;
+        if (!is_zero(_vec_throttle_filt)) {
+            // magnitude from the filtered throttle (noise suppression), but sign forced
+            // to match the raw/unfiltered throttle so reversal timing isn't lagged
+            const float atan_denom = is_negative(throttle_norm) ? -fabsf(_vec_throttle_filt) : fabsf(_vec_throttle_filt);
+            atan_angle_rad = atanf(atan_steering_norm / atan_denom);
+        }
+
+        // blend weight from filtered throttle magnitude: w=1 near zero throttle
+        // (direct mapping), w=0 at/above VEC_BLND_THR (legacy atan() mapping)
+        if (is_positive(_vec_blend_thr)) {
+            w = 1.0f - constrain_float(fabsf(_vec_throttle_filt) / _vec_blend_thr, 0.0f, 1.0f);
+        } else {
+            w = 0.0f;
+        }
+
+        steering_angle_rad = w * direct_angle_rad + (1.0f - w) * atan_angle_rad;
+
+        if (fabsf(steering_angle_rad) > vector_angle_max_rad) {
+            steering_angle_rad = constrain_float(steering_angle_rad, -vector_angle_max_rad, vector_angle_max_rad);
+            limit.steer_right = true;
+            limit.steer_left = true;
+        }
+
+        _vec_last_steering_angle_rad = steering_angle_rad;
+        _vec_last_w = w;
+    }
+
+    // convert steering angle to steering output (centidegrees)
+    steering_cd = steering_angle_rad / vector_angle_max_rad * 4500.0f;
+
+    // scale up throttle to compensate for steering angle, blended by the same w
+    // computed above: w=1 -> no boost, w=0 -> full cos() boost (legacy)
+    const float throttle_scaler_inv = w + (1.0f - w) * cosf(steering_angle_rad);
+    throttle_pct = throttle_norm * 100.0f;
+    if (!is_zero(throttle_scaler_inv)) {
+        throttle_pct /= throttle_scaler_inv;
+    }
 }
 
 void AP_MotorsUGV::init(uint8_t frtype)
@@ -1114,21 +1113,14 @@ void AP_MotorsUGV::output_regular(bool armed, float ground_speed, float steering
     if (armed) {
         if (_scale_steering) {
             // vectored thrust handling
-            if (have_vectored_thrust()) {  
-                if (_vec_alloc > 0) {  
-                    // unified allocator (VEC_ALLOC=1): single (fx,n) -> (steering,throttle)  
-                    // mapping. Currently an exact replica of the stock blend below;  
-                    // nav_mode gate is off until mode plumbing lands in a later step  
-                    vectored_allocate(throttle * 0.01f, steering / 4500.0f, ground_speed,  
-                                      false, steering, throttle, dt);  
-                } else {  
-                if (_vec_alloc > 0) {  
-                    // unified allocator path (VEC_ALLOC=1): identical math lives in vectored_allocate()  
-                    vectored_allocate(throttle * 0.01f, steering * (1.0f/4500.0f), ground_speed,  
-                                      false, steering, throttle, dt);  
-                } else {  
-                // normalise desired steering and throttle to ease calculations  
-                const float steering_norm = steering / 4500.0f;  
+            if (have_vectored_thrust()) {
+                if (_vec_alloc > 0) {
+                    // unified allocator path (VEC_ALLOC=1): identical math lives in vectored_allocate()
+                    vectored_allocate(throttle * 0.01f, steering * (1.0f/4500.0f), ground_speed,
+                                      false, steering, throttle, dt);
+                } else {
+                // normalise desired steering and throttle to ease calculations
+                const float steering_norm = steering / 4500.0f;
                 const float throttle_norm = throttle * 0.01f;
                 const float vector_angle_max_rad = radians(constrain_float(_vector_angle_max, 0.0f, 90.0f));
 
@@ -1214,11 +1206,11 @@ void AP_MotorsUGV::output_regular(bool armed, float ground_speed, float steering
                 // computed above: w=1 -> no boost (no forward-thrust component to preserve
                 // when driven purely by a position/speed PID at near-zero throttle),
                 // w=0 -> full cos() boost, matching original legacy behaviour
-                const float throttle_scaler_inv = w + (1.0f - w) * cosf(steering_angle_rad);  
-                if (!is_zero(throttle_scaler_inv)) {  
-                    throttle /= throttle_scaler_inv;  
-                }  
-                }  
+                const float throttle_scaler_inv = w + (1.0f - w) * cosf(steering_angle_rad);
+                if (!is_zero(throttle_scaler_inv)) {
+                    throttle /= throttle_scaler_inv;
+                }
+                }
             } else {
                 // scale steering down as speed increase above MOT_SPD_SCA_BASE (1 m/s default)
                 if (is_positive(_speed_scale_base) && (fabsf(ground_speed) > _speed_scale_base)) {
