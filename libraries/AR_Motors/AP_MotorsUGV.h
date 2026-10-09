@@ -125,6 +125,7 @@ public:
     // set by Mode::set_steering() when allows_stick_mixing() is true; consumed
     // by vectored_allocate()'s no-autonomous-reverse gate; cleared each output() cycle.
     void set_nav_context(bool nav) { _nav_context = nav; }
+	void set_pid_steering(bool en) { _pid_steering = en; }
 
     void set_nav_estimate_ne(const Vector2f &drift_ne);
 
@@ -324,6 +325,7 @@ private:
     AP_Int8 _vec_alloc;                   // VEC_ALLOC: 0 = stock vectored blend, 1 = unified allocator
     AP_Float _sfl_pivot_pct;              // SFL_PIVOT: raised floor throttle while yaw error >= SFL_IFRZ
     bool    _nav_context;                 // true if last steering request came from an autopilot mode
+	bool    _pid_steering;  // true when steering demand came through Mode::set_steering (closed-loop); manual bypass never sets it
     Vector2f _loiter_estimate_ne;           // Loiter-sourced drift estimate (m/s NE), gain applied
     uint32_t _loiter_estimate_ms;           // ms _loiter_estimate_ne last updated; 0=never
     Vector2f _nav_estimate_ne;           // Guided-sourced drift estimate (m/s, NE), gain applied

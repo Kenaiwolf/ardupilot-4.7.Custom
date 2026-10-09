@@ -504,9 +504,11 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // that closing the angle cannot remove. hold the angle, command T<0
         // (counter-torque), scaled by |omega| relative to the measured pivot
         // rate (~24 deg/s) and derated by the measured reverse efficiency
-        // (ATC_DECEL_MAX/ATC_ACCEL_MAX = 0.8). braking != stern travel, so the
-        // nav_mode reverse gate does not apply to this path
-        if (nav_mode &&
+        // (ATC_DECEL_MAX/ATC_ACCEL_MAX = 0.8). active in autopilot modes
+        // (nav_mode) and in Acro (pid_steering), where throttle comes from the
+        // speed PID and the operator has no brake lever. excluded only in
+        // Manual, which must stay a pure RC passthrough
+        if ((nav_mode || _pid_steering) &&
             fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
             (_vec_steering_filt * yaw_rate_rads) < 0.0f) {
             const float yaw_rate_max = radians(24.0f);
@@ -761,6 +763,7 @@ void AP_MotorsUGV::output(bool armed, float ground_speed, float dt)
     // Mode::set_steering(); clearing it here (after all output dispatch)
     // means a stale true can never persist into a manual-mode frame
     _nav_context = false;
+    _pid_steering = false;
 }
 
 // test steering or throttle output as a percentage of the total (range -100 to +100)
