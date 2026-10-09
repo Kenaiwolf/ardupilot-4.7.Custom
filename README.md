@@ -482,7 +482,12 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | Reverse-gate definition | stern travel = sustained T<0 with |v|<eps  
   AND |δ|<eps. T<0 opposing v or ω is braking — always legal |
   Do to-do patrí „authority(v,δ) normalization" ako budúci krok allocatora, nie ako úprava SPD_EXPO.
+  „Authority normalization — PID outputs reinterpreted as acceleration/moment demands; allocator divides by measured authority(v,δ) curve. One gain set valid across speed range. Applies to both yaw and surge axes; reverse uses separate curve (decel/accel ≈ 0.8)."
+  To-do: rýchlostne závislý gain vo vectored_allocate (jedna premenná, nie nová slučka)
 | `(int16_t)` wrap in `Mode::set_steering` | **root-caused, fix prepared — pending commit** (§4.6 + §3.3). Upstream line: re-apply the constrain after any rebase. |  
+Jedna vec na povšimnutie (nie chyba)
+Rotačná brzda z našej diskusie (T<0 pri držanom δ proti ω) sa tu ešte nerealizuje — fold produkuje T<0 len pri fx<0. Proti-moment pri saturácii uhla zatiaľ vzniká cez δ sign-flip. To je plánovaný refinment allocatora, nie bug — treba ho do to-do.
+Do to-do: pomer accel/decel použiť všade, kde sa brzdí (rotačná brzda, budúca transláčna brzda pri fx<0).
 | `stop_vehicle` bypasses `Mode::set_steering` | harmless today (output clamp at `:1130`); unify after §4.6 lands (§4.7) |  
   
 ---  
