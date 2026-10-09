@@ -839,6 +839,9 @@ void Mode::set_steering(float steering_value)
     // assert nav context so the motors layer can apply autopilot-only limits
     // (e.g. no autonomous reverse); manual modes leave it false
     g2.motors.set_nav_context(allows_stick_mixing());
+    // any steering demand through this path is closed-loop (PID-shaped);
+    // Manual bypasses Mode::set_steering entirely and leaves it false
+    g2.motors.set_pid_steering(true);
     g2.motors.set_steering(steering_value);
 }
 
