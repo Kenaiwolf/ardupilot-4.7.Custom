@@ -466,7 +466,16 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | Slew-rate limiting on vectored angle | optional future improvement if water tests show a throttle stumble |  
 | Nonlinear thrust effectiveness in rotation | at δ=90° full throttle, first ~10 deg/s overshoot then G-limits clamp at ~45; future allocator should dose N-moment via T·sin(δ), not flat throttle shaping |  
 | SFL_PIVOT semantics | meant as full-throttle pivot capability (default ~100%), not scaled off SFL_MAX; rotation limit should come from G-limit + physics only |  
-| Yaw rate cap during pivot | at δ=90°, T=100% the turn-rate loop has no lever left — rate is set by hull drag/G only; verify water test shows acceptable peak deg/s |  
+| Yaw rate cap during pivot | at δ=90°, T=100% the turn-rate loop has no lever left — rate is set by hull drag/G only; verify water test shows acceptable peak deg/s | 
+| N→T spill allocation | when δ saturates (e.g. ANGLEMAX=90 pivot), residual  
+  yaw demand is dropped by limit flags today; allocator should convert it  
+  into throttle (N = T·sinδ). Inverse: when yaw rate is already high,  
+  allocator should close δ and return cosδ to forward thrust. This is the  
+  missing axis of the vectored control — current atan-boost approximates  
+  it indirectly via 1/cos(δ) scaling |  
+| Nonlinear thrust effectiveness (rotation) | first ~10 deg/s at δ=90°  
+  is a spike (same physics as the 1.8-expo fix for forward accel);  
+  allocator should dose yaw moment via T·sin(δ) ramp, not flat T |
 | `(int16_t)` wrap in `Mode::set_steering` | **root-caused, fix prepared — pending commit** (§4.6 + §3.3). Upstream line: re-apply the constrain after any rebase. |  
 | `stop_vehicle` bypasses `Mode::set_steering` | harmless today (output clamp at `:1130`); unify after §4.6 lands (§4.7) |  
   
