@@ -2,7 +2,7 @@
   
 **Fork base:** upstream ArduPilot **Rover 4.7.1** (release line ending at `dbe79216`, Sep 2026). Fork work begins at `baab9fab` ("nutne minimum V1") and culminates at `9f09d8bf` (this document).  
   
-**Target vehicle:** 250 kg vectored-thrust boat (single steerable thruster, GPS + compass, no wheel encoders).  
+**Target vehicle:** 250 kg vectored-thrust boat (single steerable thruster on bow, GPS + compass, no wheel encoders,no proximity or optical sensortes).
   
 **Modified files:** `Rover/GCS_MAVLink_Rover.cpp`, `Rover/mode.cpp`, `Rover/mode.h`, `Rover/mode_guided.cpp`, `Rover/mode_loiter.cpp`, `libraries/APM_Control/AR_AttitudeControl.cpp/.h`, `libraries/AR_Motors/AP_MotorsUGV.cpp/.h`, baro driver replace `AP_BARO_LPS2XH`→`AP_BARO_MS5611` (`0320e405`), param files `Tools/Frame_params/Deset-mapping-boat.param` + `Tools/autotest/default_params/rover-vectored.parm`, new file `extra_hwdef.dat` (repo root), `README.md` (this file).  
   
