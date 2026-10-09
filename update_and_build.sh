@@ -4,7 +4,7 @@ set -euo pipefail
   
 REPO=/home/kenai/ardupilot-4.7.Custom  
 BOARD=Pixhawk1  
-BRANCH=main             # over cez: git branch -a  
+BRANCH=ardupilot-4.7.Custom  
   
 cd "$REPO"  
   
