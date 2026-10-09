@@ -825,9 +825,12 @@ void Mode::calc_steering_to_heading(float desired_heading_cd, float rate_max_deg
 
 void Mode::set_steering(float steering_value)
 {
-    if (allows_stick_mixing() && g2.stick_mixing > 0) {  
-        steering_value = channel_steer->stick_mixing((int16_t)constrain_float(steering_value, -4500.0f, 4500.0f));  
+    if (allows_stick_mixing() && g2.stick_mixing > 0) {
+        steering_value = channel_steer->stick_mixing((int16_t)constrain_float(steering_value, -4500.0f, 4500.0f));
     }
+    // assert nav context so the motors layer can apply autopilot-only limits
+    // (e.g. no autonomous reverse); manual modes leave it false
+    g2.motors.set_nav_context(allows_stick_mixing());
     g2.motors.set_steering(steering_value);
 }
 
