@@ -219,7 +219,13 @@ private:
     void clear_omni_motors(int8_t motor_num);
 
     // output to regular steering and throttle channels
-    void output_regular(bool armed, float ground_speed, float steering, float throttle, float dt);
+    void output_regular(bool armed, float ground_speed, float steering, float throttle, float dt);  
+  
+    // unified vectored-thrust allocator (VEC_ALLOC=1): maps desired surge force  
+    // fx_req and yaw moment n_req (both normalised -1..1) to steering centidegrees  
+    // and throttle percent; nav_mode enables the braking-only autonomous reverse policy  
+    void vectored_allocate(float fx_req, float n_req, float ground_speed,  
+                           bool nav_mode, float &steering_cd, float &throttle_pct) const;
 
     // output to skid steering channels
     void output_skid_steering(bool armed, float steering, float throttle, float dt);
@@ -308,7 +314,8 @@ private:
     float   _vec_throttle_filt;           // low-pass filtered throttle_norm used by vectored-thrust steering blend
 	float   _vec_steering_filt;   // low-pass filtered steering_norm, same time constant as _vec_throttle_filt
     float   _vec_last_steering_angle_rad; // last commanded vectored-thrust steering angle (rad), held during deadband
-    float   _vec_last_w;                  // last blend weight (w), held during deadband so throttle boost stays consistent
+    float   _vec_last_w;                  // last blend weight (w), held during deadband so throttle boost stays consistent  
+    AP_Int8 _vec_alloc;                   // VEC_ALLOC: 0 = stock vectored blend, 1 = unified allocator
     Vector2f _loiter_estimate_ne;           // Loiter-sourced drift estimate (m/s NE), gain applied
     uint32_t _loiter_estimate_ms;           // ms _loiter_estimate_ne last updated; 0=never
     Vector2f _nav_estimate_ne;           // Guided-sourced drift estimate (m/s, NE), gain applied

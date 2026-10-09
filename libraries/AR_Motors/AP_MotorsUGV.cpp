@@ -285,8 +285,15 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @Units: deg/s
     // @Range: 0 45
     // @User: Advanced
-    AP_GROUPINFO("DRIFT_EST_YR", 38, AP_MotorsUGV, _drift_est_yaw_rate_dps, 15.0f),
-
+    AP_GROUPINFO("DRIFT_EST_YR", 38, AP_MotorsUGV, _drift_est_yaw_rate_dps, 15.0f),  
+  
+    // @Param: VEC_ALLOC  
+    // @DisplayName: Vectored thrust unified allocator  
+    // @Description: 0 = stock blended atan/direct mapping in output_regular; 1 = unified allocator mapping (surge force, yaw moment) to thruster angle+throttle. Braking-only reverse policy for autonomous modes is enforced inside the allocator  
+    // @Values: 0:Disabled,1:Enabled  
+    // @User: Advanced  
+    AP_GROUPINFO("VEC_ALLOC", 39, AP_MotorsUGV, _vec_alloc, 0),  
+  
     AP_GROUPEND
 };
 
@@ -406,10 +413,31 @@ bool AP_MotorsUGV::get_current_estimate_ne(Vector2f &current_ne) const
         return false;
     }
 
-    current_ne = use_loiter ? _loiter_estimate_ne : _nav_estimate_ne;
-    return true;
-}
-
+    current_ne = use_loiter ? _loiter_estimate_ne : _nav_estimate_ne;  
+    return true;  
+}  
+  
+// unified vectored-thrust allocator (VEC_ALLOC=1). maps desired surge force  
+// fx_req and yaw moment n_req (both normalised -1..1) to steering centidegrees  
+// and throttle percent. nav_mode enforces the no-autonomous-reverse policy:  
+// reverse thrust is allowed only as braking while the vehicle is still moving  
+// forward; at rest, fx_req<0 is clamped to zero and all energy goes to n_req  
+// (pivot) - a boat must never autonomously back stern-first into waves/current.  
+// currently a passthrough skeleton (dead code): allocation logic lands in step 2.  
+void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_speed,  
+                                     bool nav_mode, float &steering_cd, float &throttle_pct) const  
+{  
+    // policy gate: autonomous reverse allowed only while still moving forward  
+    // (active braking). reuses LOIT_DRF_MIN magnitude as the rest-speed threshold  
+    if (nav_mode && is_negative(fx_req) && (ground_speed <= _loit_drift_min)) {  
+        fx_req = 0.0f;  
+    }  
+    const float vector_angle_max_rad = radians(constrain_float(_vector_angle_max, 0.0f, 90.0f));  
+    (void)vector_angle_max_rad;  // used by step-2 allocation  
+    steering_cd = constrain_float(n_req, -1.0f, 1.0f) * 4500.0f;  
+    throttle_pct = constrain_float(fx_req, -1.0f, 1.0f) * 100.0f;  
+}  
+  
 void AP_MotorsUGV::init(uint8_t frtype)
 {
     _frame_type = frame_type(frtype);
