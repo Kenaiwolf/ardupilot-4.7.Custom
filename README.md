@@ -1,10 +1,10 @@
 # Fork Documentation: Kenaiwolf/ardupilot-4.7.Custom — Rover Vectored-Thrust Drift Compensation  
   
-**Fork base:** upstream ArduPilot `b2b1b3d2` (16 Sep 2025). All commits above it are fork work, culminating at `375952a5` (hwdef).  
+**Fork base:** upstream ArduPilot **Rover 4.7.1** (release line ending at `dbe79216`, Sep 2026). Fork work begins at `baab9fab` ("nutne minimum V1") and culminates at `9f09d8bf` (this document).  
   
 **Target vehicle:** 250 kg vectored-thrust boat (single steerable thruster, GPS + compass, no wheel encoders).  
   
-**Modified files:** `Rover/GCS_MAVLink_Rover.cpp`, `Rover/mode.cpp`, `Rover/mode.h`, `Rover/mode_guided.cpp`, `Rover/mode_loiter.cpp`, `libraries/APM_Control/AR_AttitudeControl.cpp/.h`, `libraries/AR_Motors/AP_MotorsUGV.cpp/.h`, new file `extra_hwdef.dat`.  
+**Modified files:** `Rover/GCS_MAVLink_Rover.cpp`, `Rover/mode.cpp`, `Rover/mode.h`, `Rover/mode_guided.cpp`, `Rover/mode_loiter.cpp`, `libraries/APM_Control/AR_AttitudeControl.cpp/.h`, `libraries/AR_Motors/AP_MotorsUGV.cpp/.h`, baro driver replace `AP_BARO_LPS2XH`→`AP_BARO_MS5611` (`0320e405`), param files `Tools/Frame_params/Deset-mapping-boat.param` + `Tools/autotest/default_params/rover-vectored.parm`, new file `extra_hwdef.dat` (repo root), `README.md` (this file).  
   
 ---  
   
@@ -20,7 +20,7 @@ Supporting infrastructure: MAVLink named-float diagnostics, an `ATC_SPD_EXPO` no
   
 ---  
   
-## 2. `libraries/AR_Motors/AP_MotorsUGV.cpp/.h` (+352/−36, +92/−4)  
+## 2. `libraries/AR_Motors/AP_MotorsUGV.cpp/.h`  
   
 ### 2.1 Vectored-thrust angle blending (`MOT_VEC_BLEND_THR`, `MOT_VEC_DEADBAND`, `MOT_VEC_RESID_TC`)  
   
@@ -96,7 +96,7 @@ All new params live in `AP_MotorsUGV` under the `MOT_`/`LOIT_`/`DRIFT_`/`SFL_` p
   
 ---  
   
-## 3. `libraries/APM_Control/AR_AttitudeControl.cpp/.h` (+26/−13, +11/−7)  
+## 3. `libraries/APM_Control/AR_AttitudeControl.cpp/.h`  
   
 ### 3.1 Nonlinear speed→throttle feed-forward (`ATC_SPD_EXPO`)  
   
@@ -129,29 +129,30 @@ throttle_out += _throttle_speed_pid.get_ff();
   
 See §4.4 for why the collapsed direction-agnostic limit is correct.  
   
-### 3.3 Steering-rate output normalization (`get_steering_out_rate` output constrain)  
+### 3.3 Normalized steering output contract (`get_steering_out_rate`) — FIX PENDING  
   
-`get_steering_out_rate()` returns `update_all + get_ff()` — `AC_PID` never clamps this sum, so a saturated heading error produced outputs of magnitude **14–19** where every consumer expects the normalized contract **±1** (callers multiply by 4500 to get centidegrees). Combined with the `(int16_t)` cast in `Mode::set_steering` this overflowed the steering demand (see §4.6 for the full bug analysis).  
-  
-The return is now normalized at the source:  
+`get_steering_out_rate` currently returns `P+D+I+FF` **unconstrained** (upstream behavior):  
   
 ```cpp  
 float output = _steer_rate_pid.update_all(_desired_turn_rate, AP::ahrs().get_yaw_rate_earth(), dt, (motor_limit_left || motor_limit_right));  
 output += _steer_rate_pid.get_ff();  
-// constrain and return final output — callers expect normalized ±1  
-return constrain_float(output, -1.0f, 1.0f);  
-// AR_AttitudeControl.cpp ~719-722  
+return output;  
+// AR_AttitudeControl.cpp:719-722  
 ```  
   
-Why this is safe:  
+All Rover callers multiply by 4500 and treat the result as normalized ±1. Upstream stays within range only because PID gains keep the sum below ~7.3; this fork's tuning routinely produces −14…−19, which exposed the downstream `(int16_t)` wrap documented in §4.6.  
   
-- All steering consumers (`calc_steering_to_heading`, `calc_steering_from_turn_rate`, `calc_steering_from_lateral_acceleration`, `stop_vehicle`, Acro, Steering, Guided TurnRateAndSpeed) treat the return as ±1 and multiply by 4500.  
-- Decel/accel overshoot shaping happens on the **input** side (`get_turn_rate_from_heading` sqrt-limits `desired_rate` before the PID, ~`:645-651`), so the output clamp does not truncate the approach-rate shaping.  
-- ArduPlane is unaffected — it uses `AP_SteerController`, not `AR_AttitudeControl`, and applies its own `constrain_int16(steering, -4500, 4500)` in `Attitude.cpp`.  
+**Fix (prepared, pending commit):**  
+  
+```cpp  
+return constrain_float(output, -1.0f, 1.0f);  
+```  
+  
+Safe to apply: turn-rate overshoot shaping happens on the *input* (`_steer_decel_max`/`_steer_accel_max` sqrt-limits `desired_rate` at `AR_AttitudeControl.cpp:645-651`), no Rover caller relies on |output|>1, and ArduPlane uses a different class (`AP_SteerController`), so the change is Rover-only.  
   
 ---  
   
-## 4. `Rover/mode.cpp` (+354/−37) and `Rover/mode.h` (+81/−9)  
+## 4. `Rover/mode.cpp` and `Rover/mode.h`  
   
 ### 4.1 `update_drift_estimator(raw_heading_cd, desired_speed)` — nav-source estimator  
   
@@ -163,7 +164,7 @@ const bool yaw_rate_ok = fabsf(degrees(ahrs.get_yaw_rate_earth())) < drift_est_y
 // roll/pitch rates don't contaminate the gate  
 ```  
   
-`MOT_DRIFT_EST_YAWR` (default 15 °/s, 0 = off; promoted from compile-time constant `DRIFT_EST_MAX_YAW_RATE_DPS` in `mode.h`) is the yaw-rate gate. Samples collected during steady straight motion are converted into an NE drift vector and written via `set_nav_estimate_ne`. The estimator window is reset on mode entry (commit A1.2) so stale partial windows don't leak across modes.  
+`MOT_DRIFT_EST_YAWR` (default 15 °/s, 0 = off; promoted from compile-time constant `DRIFT_EST_MAX_YAW_RATE_DPS` in `mode.h`) is the yaw-rate gate. Samples collected during steady straight motion are converted into an NE drift vector and written via `set_nav_estimate_ne`. The estimator window is reset on mode entry so stale partial windows don't leak across modes.  
   
 ### 4.2 `apply_drift_compensation(heading_cd, speed)` — crab-angle correction  
   
@@ -202,11 +203,11 @@ if (!nav_has_real &&
 // mode.cpp ~59-80  
 ```  
   
-`DRIFT_SEED_MIN_AGE_MS = 50` (`mode.h:200`) blocks same-tick echo (Guided::_enter → start_loiter → ModeLoiter::_enter). Seeded sources are deliberately accepted so bridge `LOITER_WP_RESET` bounces (Guided→Loiter→Guided in ~1.5 s) don't cold-start the nav estimator — the loiter window almost never completes in that window.  
+`DRIFT_SEED_MIN_AGE_MS = 50` (`mode.h`) blocks same-tick echo (Guided::_enter → start_loiter → ModeLoiter::_enter). Seeded sources are deliberately accepted so bridge `LOITER_WP_RESET` bounces (Guided→Loiter→Guided in ~1.5 s) don't cold-start the nav estimator — the loiter window almost never completes in that window.  
   
 ### 4.4 `calc_throttle` — cosine reduction, drift FF, steering floor, I-freeze  
   
-Order of operations in the vectored-thrust + heading-fresh block (HEAD, after A1.2 reorder):  
+Order of operations in the vectored-thrust + heading-fresh block:  
   
 ```cpp  
 // 1. Cosine Throttle Reduction: reduce forward throttle at large heading error.  
@@ -219,7 +220,7 @@ if (is_positive(throttle_out)) {
 // mode.cpp ~390-399  
 ```  
   
-Then drift feed-forward is **added after** the cosine scaling (A1.2 moved it — previously the FF could be zeroed out by cos() at large crab angles, defeating its purpose of holding position):  
+Then drift feed-forward is **added after** the cosine scaling (previously the FF could be zeroed out by cos() at large crab angles, defeating its purpose of holding position):  
   
 ```cpp  
 // FF = full nonlinear curve evaluated at |drift_body.x|, NOT a local derivative —  
@@ -249,18 +250,18 @@ if (yaw_error_deg > g2.motors.get_steer_floor_deadband_deg()) {
 }  
 ```  
   
-`SFL_DB=10°`, `SFL_GAIN=0.7`, `SFL_MAX=20%`, `SFL_IFRZ=45°`. Yaw error is measured against `_steering_target_yaw_cd` (the target *before* crab correction — A1.1 fixed compounding where the corrected heading fed back into the error).  
+`SFL_DB=10°`, `SFL_GAIN=0.7`, `SFL_MAX=20%`, `SFL_IFRZ=45°`. Yaw error is measured against `_steering_target_yaw_cd` (the target *before* crab correction — fixing compounding where the corrected heading fed back into the error).  
   
-**Freshness gate:** `steering_heading_fresh` = `_steering_heading_active_ms` written by `calc_steering_to_heading()` within 50 ms (`mode.h:245-250`). This scopes floor + cosine reduction to heading-driven modes — Auto, Guided, Loiter, **and Simple and Follow** (which also call `calc_steering_to_heading` — `mode_simple.cpp:30`, `mode_follow.cpp:88`; comment updated in A1.3).  
+**Freshness gate:** `steering_heading_fresh` = `_steering_heading_active_ms` written by `calc_steering_to_heading()` within 50 ms (`mode.h`). This scopes floor + cosine reduction to heading-driven modes — Auto, Guided, Loiter, **and Simple and Follow** (which also call `calc_steering_to_heading`).  
   
 **I-freeze (`SFL_IFRZ`) — reviewed, intentionally kept:**  
   
-`steer_i_freeze` is OR'd into both limit flags and collapses to one bool passed to `AC_PID::update_i`. With `limit=true`, `update_i` permits integrator change only when error opposes integrator sign — **hold-or-decay, never grow** (`AC_PID.cpp:342-347`).  
+`steer_i_freeze` is OR'd into both limit flags and collapses to one bool passed to `AC_PID::update_i`. With `limit=true`, `update_i` permits integrator change only when error opposes integrator sign — **hold-or-decay, never grow**.  
   
-This was originally flagged as a "direction-undifferentiated freeze" defect with a proposed hard-hold fix (`i_scale=0`). On deeper analysis the current behavior is correct:  
+This was originally flagged as a "direction-undifferentiated freeze" defect with a proposed hard-hold fix. On deeper analysis the current behavior is correct:  
   
 1. **The speed-PID integrator is a body-frame quantity** — "forward thrust needed to hold commanded speed", valid only relative to the heading at which it was learned. Freeze only activates above `SFL_IFRZ=45°`, i.e. always during large reorientations. After a 90° turn, the current that required forward thrust becomes lateral (invisible to the speed PID); after 180°, the required thrust flips sign. A held integrator would be systematically *stale* — worse than zero.  
-2. **Decay acts as implicit invalidation.** During a pivot, speed error typically opposes the integrator (current/inertia carries the boat past target), so the sign rule lets the integrator bleed toward zero — a reasonable reset of a body-frame estimate. True negative windup (hard reverse after unfreeze) is already blocked: same-sign growth is never allowed, and the decay branch dead-ends at exactly zero.  
+2. **Decay acts as implicit invalidation.** During a pivot, speed error typically opposes the integrator (current/inertia carries the boat past target), so the sign rule lets the integrator bleed toward zero — a reasonable reset of a body-frame estimate. True negative windup is already blocked: same-sign growth is never allowed, and the decay branch dead-ends at exactly zero.  
   
 The world-frame memory of current lives in the drift estimator (NE coordinates), heading-invariant and unaffected by this freeze — nothing that matters is forgotten. Kept consequence: brief speed undershoot after a large turn while I re-learns drag — small at typical `ATC_SPD_I` and pivot durations.  
   
@@ -268,48 +269,39 @@ The world-frame memory of current lives in the drift estimator (NE coordinates),
   
 New members: `_steer_floor_active`, `_steering_heading_active_ms`, `_drift_rising_count`, `_drift_zero_count`, `_drift_i_filt`/`_drift_i_filt_valid`, `_inside_loiter_circle`, `_throttle_nav_pct`; constants `DRIFT_SEED_MIN_AGE_MS`, `LOITER_DRIFT_RISING_TICKS`, `LOITER_DRIFT_ZERO_TICKS=5`; helpers `update_drift_estimator`, `apply_drift_compensation`, `get_drift_compensation_body`, `calc_steering_to_heading`, `start_loiter` (Guided), `get_speed_thr_expo` accessor.  
   
-### 4.6 int16 wrap in `Mode::set_steering` — root cause of Loiter paralysis (fixed)  
+### 4.6 `Mode::set_steering` — `(int16_t)` overflow wrap (BUG IDENTIFIED, FIX PENDING)  
   
-Upstream code:  
+**Symptom (log 00000105.BIN, t≈10337–10473):** Loiter held a ~135–180° heading error for 137 s while `PIDS` showed the steering PID saturated (P+I+FF ≈ −14.6 every tick). `STER.SteerOut` however oscillated only ±1400 and the boat turned ~1°/s instead of ~272°/s. `WpDist` diverged 1.7→39 m.  
+  
+**Root cause:** `Mode::set_steering` (`mode.cpp:827`) casts the demand through `int16_t` inside the stick-mixing branch:  
   
 ```cpp  
 void Mode::set_steering(float steering_value)  
 {  
     if (allows_stick_mixing() && g2.stick_mixing > 0) {  
-        steering_value = channel_steer->stick_mixing((int16_t)steering_value);  
+        steering_value = channel_steer->stick_mixing((int16_t)steering_value);  // WRAP  
     }  
     g2.motors.set_steering(steering_value);  
 }  
-// mode.cpp ~824-830  
 ```  
   
-The `(int16_t)` cast is on an **upstream** line, dormant in stock Rover because steering PID output rarely exceeds ~±7.3 (±32768/4500). This fork's tuning (strong FF, large sustained heading errors in Loiter) produces saturated sums of **−14 to −19** → `steering_out × 4500` = **−65 000…−85 000** → the cast wraps modulo 65536 into ±32768 garbage.  
+A saturated demand of −18.77×4500 = **−84465** wraps mod 65536 to **−18929** — observed SteerOut −18840 (delta = unlogged D-term). Verified on 6/6 sampled points; wrapped output sits almost exactly on the −65536 boundary, so ±0.3-unit PID jitter sweeps the servo output through zero → average deflection ≈ 0 → self-locking failure. Active because `ModeLoiter::is_autopilot_mode() = true` (`mode.h`) → `allows_stick_mixing()` is true whenever `STICK_MIXING > 0`.  
   
-Log evidence (`00000105.BIN`, Loiter, 137 s window): `PIDS.P+I+FF ≈ −14.6` constant, but `STER.SteerOut` (= `get_steering()` = `_steering`) oscillated ±1400 — matching `(int16_t)` wrap of the saturated demand to within ~90 counts (the residual is the unlogged D-term):  
-  
-| P+I+FF | ×4500 | int16 wrap | Logged SteerOut |  
-|---|---|---|---|  
-| −18.77 | −84 465 | −18 929 | −18 840 |  
-| −14.36 | −64 620 | +916 | +921 |  
-| −14.87 | −66 933 | −1 397 | −1 380 |  
-| −0.77 | −3 465 | −3 465 | −3 342 |  
-  
-Consequence chain: wrapped demand means `≈0` average thruster deflection → boat turns ~1°/s instead of commanded ~272°/s → yaw error persists → PID stays saturated near the wrap boundary (`−14.6×4500 ≈ −65 700`, almost exactly `−65 536`) → self-locking state; `WpDist` diverged 1.7→39 m.  
-  
-Fix (primary): clamp before the cast.  
+**Fix (prepared, pending commit):**  
   
 ```cpp  
 steering_value = channel_steer->stick_mixing((int16_t)constrain_float(steering_value, -4500.0f, 4500.0f));  
-// mode.cpp ~827  
 ```  
   
-Fix (defense-in-depth): constrain `get_steering_out_rate` output to ±1 — see §3.3. Both layers are applied; neither is redundant in isolation (the cast bug would wrap any future caller exceeding ±4500 even with a normalized PID).  
+Plus the defense-in-depth clamp in §3.3. Affects **every** autopilot mode (`is_autopilot_mode()=true`) whenever `STICK_MIXING>0` and the heading PID saturates — not just Loiter. Interaction with fork features is positive: §5.3's `get_steering()/4500` normalization and §2.1's `steering_norm` blend both assume ±4500 and currently receive wrapped garbage.  
   
-**Rebase warning:** `mode.cpp:827` is an unmodified upstream line — on the next upstream rebase the constrain must be re-applied manually.  
+### 4.7 Related — `stop_vehicle` bypass  
+  
+`Mode::stop_vehicle` (`mode.cpp:475`) calls `g2.motors.set_steering(steering_out * 4500.0)` **directly**, bypassing `Mode::set_steering`. Harmless today (servo output is clamped at `AP_MotorsUGV.cpp:1130`), but worth unifying so all steering output flows through one path.  
   
 ---  
   
-## 5. `Rover/mode_loiter.cpp` (+303/−52)  
+## 5. `Rover/mode_loiter.cpp`  
   
 Loiter is the second drift source and the main beneficiary of compensation.  
   
@@ -327,7 +319,7 @@ When drift exceeds the minimum, loiter steers the bow into the estimated current
   
 While inside the loiter circle, the controller watches `_throttle_nav_pct` (snapshot taken before the floor/FF block — `mode.cpp:367`). When drift pushes the boat and nav throttle keeps rising for `LOITER_DRIFT_RISING_TICKS` consecutive ticks, a **coast** window opens: throttle drops below `LOIT_COAST_THR` (1 %) and the GPS velocity during the coast is sampled as a drift measurement → `set_loiter_estimate_ne`.  
   
-**Rotation gate (A1.1):** sampling is rejected while the boat is actively rotating:  
+**Rotation gate:** sampling is rejected while the boat is actively rotating:  
   
 ```cpp  
 const float yaw_rate_degs = fabsf(degrees(ahrs.get_yaw_rate_earth()));  
@@ -337,7 +329,7 @@ const float yaw_rate_degs = fabsf(degrees(ahrs.get_yaw_rate_earth()));
 // ~0.5 m/s that is NOT drift  
 ```  
   
-Originally implemented with `ahrs.get_gyro().z` (body-frame); changed to `get_yaw_rate_earth()` in A1.4 so wave-induced roll/pitch rates don't false-trigger the gate — consistent with the nav estimator's gate.  
+Uses `get_yaw_rate_earth()` (earth-frame) so wave-induced roll/pitch rates don't false-trigger the gate — consistent with the nav estimator's gate.  
   
 **`_steer_floor_active` gate:** coast sampling is suppressed while the floor is forcing throttle (the boat isn't coasting).  
   
@@ -368,9 +360,9 @@ const float drift_mag_mps = MIN(cruise_speed * powf((_drift_i_filt + ff_frac) / 
 // mode_loiter.cpp ~188-193  
 ```  
   
-Tunables: `LOIT_I_EQERR` (throttle-stability window 0.10), `LOIT_I_MIN` (noise floor 0.02), `LOIT_I_ALPHA` (EMA 0.10), `LOIT_I_DISAG` (method-1/method-2 disagreement handling 0.5). The inverse `powf(…, 1/expo)` maps I-term-fraction → equivalent speed using the same `ATC_SPD_EXPO` curve as the forward direction.  
+> **Depends on §4.6 fix:** the `/4500` normalization assumes `_steering ∈ ±4500`. Until the fix is committed, this estimator receives wrapped values whenever the heading PID saturates.  
   
-> **Dependency on §4.6 fix:** the `get_steering()/4500.0f` normalization above assumes `_steering ∈ ±4500`. Before the wrap fix, the wrapped demand corrupted `steer_ang_rad` (e.g. −84 465 → −18 929 → ~−4.2× max angle in a random direction) and poisoned `meas_dir_ne`/`thrust_rad`. With the fix, saturation reads as a truthful ±max-angle deflection in the correct direction.  
+Tunables: `LOIT_I_EQERR` (throttle-stability window 0.10), `LOIT_I_MIN` (noise floor 0.02), `LOIT_I_ALPHA` (EMA 0.10), `LOIT_I_DISAG` (method-1/method-2 disagreement handling 0.5). The inverse `powf(…, 1/expo)` maps I-term-fraction → equivalent speed using the same `ATC_SPD_EXPO` curve as the forward direction.  
   
 ### 5.4 Seeding on loiter entry  
   
@@ -378,7 +370,7 @@ Symmetric to `Mode::enter` (§4.3): seeds the loiter slot from the nav estimate,
   
 ---  
   
-## 6. `Rover/mode_guided.cpp` (+30/−15)  
+## 6. `Rover/mode_guided.cpp`  
   
 Two changes:  
   
@@ -425,34 +417,34 @@ The uncompensated-in / local-copy-out discipline is the key correctness invarian
   
 ---  
   
-## 7. `Rover/GCS_MAVLink_Rover.cpp` (+40/−10)  
+## 7. `Rover/GCS_MAVLink_Rover.cpp`  
   
 `send_named_float` diagnostics on `MAVLINK_COMM_0` only (avoids N× duplication per channel): `DRIFTN`/`DRIFTE`/`DRIFTSPD` current estimate, `DRIFTNAGE`/`DRIFTNSED`/`DRIFTLAGE`/`DRIFTLSED` sample age (s) and seeded flag per slot — essential for A/B verification on water.  
   
 ---  
   
-## 8. `extra_hwdef.dat` (~850 lines, new)  
+## 8. `extra_hwdef.dat` (repo root, new)  
   
-Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define … 0` — copter/plane modes, most rangefinder/mount/camera/OSD/CAN bindings, EKF2 (`HAL_NAVEKF2_AVAILABLE 0`), airspeed, and most GPS/compass drivers removed (kept: uBlox, NMEA, IST8310).  
+Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define … 0` — copter/plane modes, most rangefinder/mount/camera/OSD/CAN bindings, EKF2 (`HAL_NAVEKF2_AVAILABLE 0`), airspeed, and most GPS/compass drivers removed (kept: uBlox, NMEA, IST8310). Baro driver switched `AP_BARO_LPS2XH`→`AP_BARO_MS5611` in commit `0320e405`.  
   
 ---  
   
-## 9. Parameter summary (all new, in `AP_MotorsUGV`)  
+## 9. Parameter summary  
   
-| Param | Default | Purpose |  
-|---|---|---|  
-| `MOT_VEC_BLEND_THR` | 0.3 | throttle fraction where angle blend switches direct→atan |  
-| `MOT_VEC_DEADBAND` | 0.03 | steering deadband, freezes last angle |  
-| `MOT_VEC_RESID_TC` | 0.5 s | throttle filter TC for blend weight |  
-| `ATC_SPD_EXPO` | 1.0 | speed↔throttle curve exponent (shared by FF, method-2, clamp) |  
-| `DRIFT_GAIN_NAV` / `DRIFT_GAIN_LOIT` | 1.0 | write-time gains; both 0 = full kill-switch |  
-| `DRIFT_MAXAGE` | 1800 s | shared staleness cutoff; 0 = never trust |  
-| `MOT_DRIFT_EST_YAWR` | 15 °/s | nav estimator yaw-rate gate; 0 = off |  
-| `SFL_DB`/`SFL_GAIN`/`SFL_MAX`/`SFL_IFRZ` | 10°/0.7/20%/45° | steering floor + I-freeze |  
-| `LOIT_DRIFT_MIN` | 0.03 m/s | anti-drift heading activation |  
-| `LOIT_COAST_THR` | 1 % | coast gate (method 1) |  
-| `LOIT_I_EQERR`/`I_MIN`/`I_ALPHA`/`I_DISAG` | 0.10/0.02/0.10/0.5 | method-2 window, noise floor, EMA, disagreement |  
-| `LOIT_ROT_ANG`/`LOIT_ROT_RATE` | 15°/20 °/s | rotation gate (method 1); 0 = off |  
+| Param | Location | Default | Purpose |  
+|---|---|---|---|  
+| `MOT_VEC_BLEND_THR` | AP_MotorsUGV | 0.3 | throttle fraction where angle blend switches direct→atan |  
+| `MOT_VEC_DEADBAND` | AP_MotorsUGV | 0.03 | steering deadband, freezes last angle |  
+| `MOT_VEC_RESID_TC` | AP_MotorsUGV | 0.5 s | throttle filter TC for blend weight |  
+| `ATC_SPD_EXPO` | AR_AttitudeControl | 1.0 | speed↔throttle curve exponent (shared by FF, method-2, clamp) |  
+| `DRIFT_GAIN_NAV` / `DRIFT_GAIN_LOIT` | AP_MotorsUGV | 1.0 | write-time gains; both 0 = full kill-switch |  
+| `DRIFT_MAXAGE` | AP_MotorsUGV | 1800 s | shared staleness cutoff; 0 = never trust |  
+| `MOT_DRIFT_EST_YAWR` | AP_MotorsUGV | 15 °/s | nav estimator yaw-rate gate; 0 = off |  
+| `SFL_DB`/`SFL_GAIN`/`SFL_MAX`/`SFL_IFRZ` | AP_MotorsUGV | 10°/0.7/20%/45° | steering floor + I-freeze |  
+| `LOIT_DRIFT_MIN` | AP_MotorsUGV | 0.03 m/s | anti-drift heading activation |  
+| `LOIT_COAST_THR` | AP_MotorsUGV | 1 % | coast gate (method 1) |  
+| `LOIT_I_EQERR`/`I_MIN`/`I_ALPHA`/`I_DISAG` | AP_MotorsUGV | 0.10/0.02/0.10/0.5 | method-2 window, noise floor, EMA, disagreement |  
+| `LOIT_ROT_ANG`/`LOIT_ROT_RATE` | AP_MotorsUGV | 15°/20 °/s | rotation gate (method 1); 0 = off |  
   
 ---  
   
@@ -462,7 +454,7 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 - **Estimator feedback hygiene:** every estimator input is the uncompensated command; every compensation output is applied to a local copy. Violating either rule creates a subtraction loop that under-estimates drift.  
 - **Seed safety:** seeds carry original timestamps → guaranteed aging; `seed_weight ≤ 1` → ping-pong decays; real estimates always outrank seeds; same-tick echo blocked by `DRIFT_SEED_MIN_AGE_MS`; real-destination overwrite blocked by the `*_has_real` guard.  
 - **Units discipline:** speeds m/s, headings centi-degrees, throttle 0–100 % at `calc_throttle` level vs −1..+1 inside `AR_AttitudeControl`, drift estimates always earth-frame NE.  
-- **Normalized steering contract:** `get_steering_out_rate` returns ±1 and `_steering` is always ±4500 centidegrees (§3.3, §4.6). Every consumer of `_steering` — vectored blend, method-2 estimator, `STER.SteerOut` logging — may rely on that range.  
+- **Normalized steering contract (post-fix):** once §3.3 + §4.6 are committed, `get_steering_out_rate` returns ±1 and `_steering` is always ±4500 centidegrees. Every consumer of `_steering` — vectored blend (§2.1), method-2 estimator (§5.3), `STER.SteerOut` logging — may rely on that range. Until then, treat `_steering` as untrusted under PID saturation.  
   
 ## 11. Known-open items (deliberate)  
   
@@ -472,10 +464,11 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | `MOT_VEC_ANGLEMAX=90` boost spike near 89° | kept — clamping removes turn authority at speed |  
 | Follow mode: no estimator feed | Follow→Loiter starts cold; documented |  
 | Slew-rate limiting on vectored angle | optional future improvement if water tests show a throttle stumble |  
-| `(int16_t)` wrap in `Mode::set_steering` | **fixed** (§4.6 + §3.3) — upstream line; re-apply constrain on rebase |  
+| `(int16_t)` wrap in `Mode::set_steering` | **root-caused, fix prepared — pending commit** (§4.6 + §3.3). Upstream line: re-apply the constrain after any rebase. |  
+| `stop_vehicle` bypasses `Mode::set_steering` | harmless today (output clamp at `:1130`); unify after §4.6 lands (§4.7) |  
   
 ---  
   
-*Caveat: line numbers were taken from git HEAD blame/diffs; the repo search index lags HEAD so exact lines may drift ±a few. `extra_hwdef.dat` was summarized from diff statistics rather than a line-by-line read.*  
+*Caveat: line numbers were taken from git HEAD blame/diffs; the repo search index lags HEAD so exact lines may drift ±a few. `extra_hwdef.dat` and parameter default values were summarized rather than read line-by-line — verify defaults against `AP_MotorsUGV.cpp` `AP_GROUPINFO` table before publishing externally.*  
   
 [![Discord](https://img.shields.io/discord/674039678562861068.svg)](https://ardupilot.org/discord)
