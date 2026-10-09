@@ -425,114 +425,92 @@ bool AP_MotorsUGV::get_current_estimate_ne(Vector2f &current_ne) const
     return true;
 }
 
-// unified vectored-thrust allocator (VEC_ALLOC=1). maps desired surge force
-// fx_req and yaw moment n_req (both normalised -1..1) to steering centidegrees
-// and throttle percent. nav_mode enforces the no-autonomous-reverse policy:
-// reverse thrust is allowed only as braking while the vehicle is still moving
-// forward; at rest, fx_req<0 is clamped to zero and all energy goes to n_req
-// (pivot) - a boat must never autonomously back stern-first into waves/current.
-// unified vectored-thrust allocator (VEC_ALLOC=1). step-2 replica: performs the
-// identical blend math that output_regular() runs in its legacy branch, moved
-// here verbatim so both paths stay bit-identical. (fx_req, n_req) semantics and
-// the no-autonomous-reverse policy gate are applied on top.
+// unified vectored-thrust allocator (VEC_ALLOC=1). continuous allocation:
+// the (fx_req, n_req) demand is one thrust vector - its direction selects the
+// thruster angle, its magnitude and the dominant axis select throttle. no
+// per-regime states: atan2 handles 0/45/90 deg continuously, saturation folds
+// residual demand into the other channel instead of dropping it.
 void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_speed,
                                      bool nav_mode, float &steering_cd, float &throttle_pct, float dt)
 {
     // policy gate: autonomous reverse allowed only while still moving forward
-    // (active braking). reuses LOIT_DRF_MIN magnitude as the rest-speed threshold
+    // (active braking). reuses LOIT_DRF_MIN magnitude as the rest-speed threshold.
+    // reverse at saturated deflection is rotation braking, not stern travel, and
+    // stays legal - it is produced by the fold below only when fx_req<0 demands it
     if (nav_mode && is_negative(fx_req) && (ground_speed <= _loit_drift_min)) {
         fx_req = 0.0f;
     }
 
-    const float steering_norm = constrain_float(n_req, -1.0f, 1.0f);
-    const float throttle_norm = constrain_float(fx_req, -1.0f, 1.0f);
+    const float fx = constrain_float(fx_req, -1.0f, 1.0f);
+    const float n  = constrain_float(n_req, -1.0f, 1.0f);
     const float vector_angle_max_rad = radians(constrain_float(_vector_angle_max, 0.0f, 90.0f));
 
-    // low-pass filter throttle to distinguish sudden step commands from
-    // steady-state near-zero throttle, where atan() amplifies noise
+    // low-pass filter the demand vector to suppress atan2 noise amplification
+    // near zero throttle (same purpose as the legacy filter)
     if (is_positive(_vec_resid_tc)) {
         const float alpha = constrain_float(dt / (_vec_resid_tc + dt), 0.0f, 1.0f);
-        _vec_throttle_filt += (throttle_norm - _vec_throttle_filt) * alpha;
-        _vec_steering_filt += (steering_norm - _vec_steering_filt) * alpha;
+        _vec_throttle_filt += (fx - _vec_throttle_filt) * alpha;
+        _vec_steering_filt += (n - _vec_steering_filt) * alpha;
     } else {
-        _vec_throttle_filt = throttle_norm;
-        _vec_steering_filt = steering_norm;
-    }
-
-    // steering can never be more than filtered-throttle * tan(_vector_angle_max)
-    const float steering_norm_lim = fabsf(_vec_throttle_filt * tanf(vector_angle_max_rad));
-    float atan_steering_norm = steering_norm;
-    if (fabsf(atan_steering_norm) > steering_norm_lim) {
-        if (is_positive(atan_steering_norm)) {
-            atan_steering_norm = steering_norm_lim;
-        } else {
-            atan_steering_norm = -steering_norm_lim;
-        }
-        limit.steer_right = true;
-        limit.steer_left = true;
+        _vec_throttle_filt = fx;
+        _vec_steering_filt = n;
     }
 
     const float vec_mag = sqrtf(sq(_vec_steering_filt) + sq(_vec_throttle_filt));
 
-    float w = 1.0f;   // blend weight: 1 = pure direct/quadrant mapping, 0 = legacy full atan()
     float steering_angle_rad;
+    float throttle_norm;
 
     if (vec_mag < _vec_deadband) {
-        // both steering and throttle demand are negligible: freeze angle
-        // (and blend weight) to suppress jitter instead of letting atan()
-        // amplify noise, and so the throttle-boost stays consistent with
-        // whatever regime (direct vs. atan) was active just before freezing
+        // negligible demand on both axes: freeze the angle to suppress jitter
+        // and output zero thrust
         steering_angle_rad = _vec_last_steering_angle_rad;
-        w = _vec_last_w;
+        throttle_norm = 0.0f;
     } else {
-        // direct/quadrant-based angle: proportional to steering demand only,
-        // sign-folded for reverse throttle so the thruster points the correct way
-        float direct_angle_rad = constrain_float(steering_norm, -1.0f, 1.0f) * vector_angle_max_rad;
-        // use the raw (unfiltered) throttle sign so the vector flips at the same instant
-        // the actual commanded throttle crosses zero, not delayed by the low-pass filter
-        if (is_negative(throttle_norm)) {
-            direct_angle_rad = -direct_angle_rad;
+        // desired thrust direction in (surge, yaw) space
+        float delta = atan2f(_vec_steering_filt, _vec_throttle_filt);
+
+        // fold demands pointing aft into the +/-90 deg envelope with negative
+        // thrust (reverse). reverse reachable only via this fold: fx<0 while
+        // moving = braking, and the nav_mode gate above zeroes it at rest
+        if (fabsf(delta) > M_PI_2) {
+            delta = is_positive(delta) ? (delta - M_PI) : (delta + M_PI);
+        }
+        steering_angle_rad = constrain_float(delta, -vector_angle_max_rad, vector_angle_max_rad);
+
+        // magnitude: satisfy whichever axis dominates after the angle clamp.
+        // T = fx/cos(d) preserves surge exactly; T = n/sin(d) preserves yaw
+        // exactly; taking the larger one means a saturated angle spills its
+        // unmet demand into throttle instead of dropping it
+        const float sin_d = sinf(steering_angle_rad);
+        const float cos_d = cosf(steering_angle_rad);
+        const float t_surge = (fabsf(cos_d) > 1e-3f) ? (_vec_throttle_filt / cos_d) : 0.0f;
+        const float t_yaw   = (fabsf(sin_d) > 1e-3f) ? (_vec_steering_filt / sin_d) : 0.0f;
+        const bool yaw_dominant = fabsf(t_yaw) > fabsf(t_surge);
+        throttle_norm = yaw_dominant ? t_yaw : t_surge;
+
+        // sign consistency after folding: if the demand pointed aft, thrust
+        // must be negative at the folded angle to keep the same vector
+        if (is_negative(_vec_throttle_filt) && is_positive(throttle_norm)) {
+            throttle_norm = -throttle_norm;
         }
 
-        // legacy atan()-based angle, guarded against divide-by-zero
-        float atan_angle_rad = 0.0f;
-        if (!is_zero(_vec_throttle_filt)) {
-            // magnitude from the filtered throttle (noise suppression), but sign forced
-            // to match the raw/unfiltered throttle so reversal timing isn't lagged
-            const float atan_denom = is_negative(throttle_norm) ? -fabsf(_vec_throttle_filt) : fabsf(_vec_throttle_filt);
-            atan_angle_rad = atanf(atan_steering_norm / atan_denom);
-        }
-
-        // blend weight from filtered throttle magnitude: w=1 near zero throttle
-        // (direct mapping), w=0 at/above VEC_BLND_THR (legacy atan() mapping)
-        if (is_positive(_vec_blend_thr)) {
-            w = 1.0f - constrain_float(fabsf(_vec_throttle_filt) / _vec_blend_thr, 0.0f, 1.0f);
-        } else {
-            w = 0.0f;
-        }
-
-        steering_angle_rad = w * direct_angle_rad + (1.0f - w) * atan_angle_rad;
-
-        if (fabsf(steering_angle_rad) > vector_angle_max_rad) {
-            steering_angle_rad = constrain_float(steering_angle_rad, -vector_angle_max_rad, vector_angle_max_rad);
+        if (fabsf(steering_angle_rad) >= vector_angle_max_rad) {
             limit.steer_right = true;
             limit.steer_left = true;
         }
+        if (fabsf(throttle_norm) > 1.0f) {
+            throttle_norm = constrain_float(throttle_norm, -1.0f, 1.0f);
+            limit.throttle_lower = true;
+            limit.throttle_upper = true;
+        }
 
         _vec_last_steering_angle_rad = steering_angle_rad;
-        _vec_last_w = w;
     }
 
     // convert steering angle to steering output (centidegrees)
     steering_cd = steering_angle_rad / vector_angle_max_rad * 4500.0f;
-
-    // scale up throttle to compensate for steering angle, blended by the same w
-    // computed above: w=1 -> no boost, w=0 -> full cos() boost (legacy)
-    const float throttle_scaler_inv = w + (1.0f - w) * cosf(steering_angle_rad);
     throttle_pct = throttle_norm * 100.0f;
-    if (!is_zero(throttle_scaler_inv)) {
-        throttle_pct /= throttle_scaler_inv;
-    }
 }
 
 void AP_MotorsUGV::init(uint8_t frtype)
