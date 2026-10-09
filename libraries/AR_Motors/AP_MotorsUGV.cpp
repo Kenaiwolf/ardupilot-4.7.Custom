@@ -1122,7 +1122,7 @@ void AP_MotorsUGV::output_regular(bool armed, float ground_speed, float steering
                 if (_vec_alloc > 0) {
                     // unified allocator path (VEC_ALLOC=1): identical math lives in vectored_allocate()
                     vectored_allocate(throttle * 0.01f, steering * (1.0f/4500.0f), ground_speed,
-                                      nav_context, steering, throttle, dt);
+                                      _nav_context, steering, throttle, dt);
                 } else {
                 // normalise desired steering and throttle to ease calculations
                 const float steering_norm = steering / 4500.0f;
