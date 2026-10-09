@@ -476,6 +476,11 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | Nonlinear thrust effectiveness (rotation) | first ~10 deg/s at δ=90°  
   is a spike (same physics as the 1.8-expo fix for forward accel);  
   allocator should dose yaw moment via T·sin(δ) ramp, not flat T |
+  | Rotation braking | T<0 at held saturated δ (never δ-flip a running  
+  thruster). Scale by |ω| demand. Followed by T→0, δ close, T>0 exit.  
+  nav_mode must NOT block this: braking ≠ stern travel |  
+| Reverse-gate definition | stern travel = sustained T<0 with |v|<eps  
+  AND |δ|<eps. T<0 opposing v or ω is braking — always legal |  
 | `(int16_t)` wrap in `Mode::set_steering` | **root-caused, fix prepared — pending commit** (§4.6 + §3.3). Upstream line: re-apply the constrain after any rebase. |  
 | `stop_vehicle` bypasses `Mode::set_steering` | harmless today (output clamp at `:1130`); unify after §4.6 lands (§4.7) |  
   
