@@ -4,7 +4,7 @@ set -euo pipefail
   
 REPO=/home/kenai/ardupilot-4.7.Custom  
 BOARD=Pixhawk1  
-BRANCH=ardupilot-4.7.Custom  
+BRANCH=rover-4.7-custom 
   
 cd "$REPO"  
   
