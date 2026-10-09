@@ -480,7 +480,8 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
   thruster). Scale by |ω| demand. Followed by T→0, δ close, T>0 exit.  
   nav_mode must NOT block this: braking ≠ stern travel |  
 | Reverse-gate definition | stern travel = sustained T<0 with |v|<eps  
-  AND |δ|<eps. T<0 opposing v or ω is braking — always legal |  
+  AND |δ|<eps. T<0 opposing v or ω is braking — always legal |
+  Do to-do patrí „authority(v,δ) normalization" ako budúci krok allocatora, nie ako úprava SPD_EXPO.
 | `(int16_t)` wrap in `Mode::set_steering` | **root-caused, fix prepared — pending commit** (§4.6 + §3.3). Upstream line: re-apply the constrain after any rebase. |  
 | `stop_vehicle` bypasses `Mode::set_steering` | harmless today (output clamp at `:1130`); unify after §4.6 lands (§4.7) |  
   
