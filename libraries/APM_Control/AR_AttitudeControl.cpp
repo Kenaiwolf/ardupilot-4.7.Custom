@@ -716,10 +716,10 @@ float AR_AttitudeControl::get_steering_out_rate(float desired_rate, bool motor_l
     }
 
     // update pid to calculate output to motors
-    float output = _steer_rate_pid.update_all(_desired_turn_rate, AP::ahrs().get_yaw_rate_earth(), dt, (motor_limit_left || motor_limit_right));
-    output += _steer_rate_pid.get_ff();
-    // constrain and return final output
-    return output;
+    float output = _steer_rate_pid.update_all(_desired_turn_rate, AP::ahrs().get_yaw_rate_earth(), dt, (motor_limit_left || motor_limit_right));  
+    output += _steer_rate_pid.get_ff();  
+    // constrain and return final output  
+    return constrain_float(output, -1.0f, 1.0f);
 }
 
 // get latest desired turn rate in rad/sec (recorded during calls to get_steering_out_rate)
