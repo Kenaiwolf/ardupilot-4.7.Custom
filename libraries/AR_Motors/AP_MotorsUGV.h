@@ -120,6 +120,11 @@ public:
     // get_current_estimate_ne() below is already the final, PID-ready corrected vector --
     // Mode::apply_drift_compensation()/calc_throttle() must NOT apply any further gain to it.
     void set_loiter_estimate_ne(const Vector2f &drift_ne);
+    // nav context: true while an autopilot mode is driving steering/throttle.
+    // set by Mode::set_steering() when allows_stick_mixing() is true; consumed
+    // by vectored_allocate()'s no-autonomous-reverse gate; cleared each output() cycle.
+    void set_nav_context(bool nav) { _nav_context = nav; }
+
     void set_nav_estimate_ne(const Vector2f &drift_ne);
 
     // seed the opposite-mode slot directly with an already-calibrated value
@@ -224,7 +229,7 @@ private:
     // unified vectored-thrust allocator (VEC_ALLOC=1): maps desired surge force
     // fx_req and yaw moment n_req (both normalised -1..1) to steering centidegrees
     // and throttle percent; nav_mode enables the braking-only autonomous reverse policy
-    void vectored_allocate(float fx_req, float n_req, float ground_speed,  
+    void vectored_allocate(float fx_req, float n_req, float ground_speed,
                            bool nav_mode, float &steering_cd, float &throttle_pct, float dt);
 
     // output to skid steering channels
@@ -316,6 +321,7 @@ private:
     float   _vec_last_steering_angle_rad; // last commanded vectored-thrust steering angle (rad), held during deadband
     float   _vec_last_w;                  // last blend weight (w), held during deadband so throttle boost stays consistent
     AP_Int8 _vec_alloc;                   // VEC_ALLOC: 0 = stock vectored blend, 1 = unified allocator
+    bool    _nav_context;                 // true if last steering request came from an autopilot mode
     Vector2f _loiter_estimate_ne;           // Loiter-sourced drift estimate (m/s NE), gain applied
     uint32_t _loiter_estimate_ms;           // ms _loiter_estimate_ne last updated; 0=never
     Vector2f _nav_estimate_ne;           // Guided-sourced drift estimate (m/s, NE), gain applied

@@ -717,9 +717,14 @@ void AP_MotorsUGV::output(bool armed, float ground_speed, float dt)
         _throttle = 0.0f;
     }
 
-	// clear limit flags
+    // clear limit flags
     // output_ methods are responsible for setting them to true if required on each iteration
     limit.steer_left = limit.steer_right = limit.throttle_lower = limit.throttle_upper = false;
+
+    // nav context is per-cycle: a mode must re-assert it every update, stale
+    // context must never silently persist into a manual-mode frame
+    const bool nav_context = _nav_context;
+    _nav_context = false;
 
     // sanity check parameters
     sanity_check_parameters();
@@ -1117,7 +1122,7 @@ void AP_MotorsUGV::output_regular(bool armed, float ground_speed, float steering
                 if (_vec_alloc > 0) {
                     // unified allocator path (VEC_ALLOC=1): identical math lives in vectored_allocate()
                     vectored_allocate(throttle * 0.01f, steering * (1.0f/4500.0f), ground_speed,
-                                      false, steering, throttle, dt);
+                                      nav_context, steering, throttle, dt);
                 } else {
                 // normalise desired steering and throttle to ease calculations
                 const float steering_norm = steering / 4500.0f;
