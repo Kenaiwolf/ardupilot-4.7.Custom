@@ -99,6 +99,7 @@ public:
     float get_steer_floor_gain()             const { return _sfl_gain; }
     float get_steer_floor_max_pct()          const { return _sfl_max_pct; }
     float get_steer_floor_ifreeze_deg()      const { return _sfl_ifreeze_deg; }
+    float get_steer_floor_pivot_pct()        const { return _sfl_pivot_pct; }
     float get_loit_drift_min_mps()           const { return _loit_drift_min; }
     float get_loit_coast_thr_pct()           const { return _loit_coast_thr; }
     float get_loit_i_eq_err_mps()            const { return _loit_i_eq_err; }
@@ -321,6 +322,7 @@ private:
     float   _vec_last_steering_angle_rad; // last commanded vectored-thrust steering angle (rad), held during deadband
     float   _vec_last_w;                  // last blend weight (w), held during deadband so throttle boost stays consistent
     AP_Int8 _vec_alloc;                   // VEC_ALLOC: 0 = stock vectored blend, 1 = unified allocator
+    AP_Float _sfl_pivot_pct;              // SFL_PIVOT: raised floor throttle while yaw error >= SFL_IFRZ
     bool    _nav_context;                 // true if last steering request came from an autopilot mode
     Vector2f _loiter_estimate_ne;           // Loiter-sourced drift estimate (m/s NE), gain applied
     uint32_t _loiter_estimate_ms;           // ms _loiter_estimate_ne last updated; 0=never

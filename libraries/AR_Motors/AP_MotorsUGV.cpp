@@ -294,6 +294,14 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("VEC_ALLOC", 39, AP_MotorsUGV, _vec_alloc, 0),
 
+    // @Param: SFL_PIVOT
+    // @DisplayName: Steering-floor pivot level
+    // @Description: Minimum floor throttle (%) while heading error exceeds SFL_IFRZ. At pivot-scale errors the regular floor (~11%) only yields a few deg/s; during an in-place turn all thruster authority is available for rotation anyway. 0 disables
+    // @Units: %
+    // @Range: 0 60
+    // @User: Advanced
+    AP_GROUPINFO("SFL_PIVOT", 40, AP_MotorsUGV, _sfl_pivot_pct, 0.0f),
+
     AP_GROUPEND
 };
 
