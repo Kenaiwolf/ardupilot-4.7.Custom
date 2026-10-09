@@ -511,7 +511,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             const float yaw_rate_max = radians(24.0f);
             const float reverse_eff = 0.8f;
             const float brake_frac = constrain_float(fabsf(yaw_rate_rads) / yaw_rate_max, 0.2f, 1.0f);
-            throttle_norm = -fabsf(throttle_norm) * brake_frac * reverse_eff;
+            throttle_norm = copysignf(fmaxf(fabsf(throttle_norm), brake_frac * reverse_eff), _vec_steering_filt);
         }
 
         if (fabsf(steering_angle_rad) >= vector_angle_max_rad) {
