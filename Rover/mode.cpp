@@ -424,9 +424,17 @@ void Mode::calc_throttle(float target_speed, bool avoidance_enabled)
     if (g2.motors.have_vectored_thrust() && steering_heading_fresh) {
         // 2. Steering Thrust Floor: force minimum throttle to allow rotation
         if (yaw_error_deg > g2.motors.get_steer_floor_deadband_deg()) {
-            const float steer_throttle_floor = constrain_float(
+            float steer_throttle_floor = constrain_float(
                 (yaw_error_deg - g2.motors.get_steer_floor_deadband_deg()) * g2.motors.get_steer_floor_gain(),
                 0.0f, g2.motors.get_steer_floor_max_pct());
+            // pivot boost: past the I-freeze threshold the vehicle is rotating
+            // in place anyway, so raise the floor to the dedicated pivot level.
+            // decel limiting (ATC_STR_DECEL_MAX) already shapes the turn rate
+            // demand, this only supplies the thrust to actually achieve it.
+            // 0 disables (stock floor unchanged)
+            if (yaw_error_deg >= g2.motors.get_steer_floor_ifreeze_deg()) {
+                steer_throttle_floor = MAX(steer_throttle_floor, g2.motors.get_steer_floor_pivot_pct());
+            }
             // do not override a throttle that is already stronger than the floor in
             // the same direction; only raise the magnitude, never flip its sign
             if (fabsf(throttle_out) < steer_throttle_floor) {
