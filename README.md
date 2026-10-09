@@ -464,6 +464,9 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | `MOT_VEC_ANGLEMAX=90` boost spike near 89° | kept — clamping removes turn authority at speed |  
 | Follow mode: no estimator feed | Follow→Loiter starts cold; documented |  
 | Slew-rate limiting on vectored angle | optional future improvement if water tests show a throttle stumble |  
+| Nonlinear thrust effectiveness in rotation | at δ=90° full throttle, first ~10 deg/s overshoot then G-limits clamp at ~45; future allocator should dose N-moment via T·sin(δ), not flat throttle shaping |  
+| SFL_PIVOT semantics | meant as full-throttle pivot capability (default ~100%), not scaled off SFL_MAX; rotation limit should come from G-limit + physics only |  
+| Yaw rate cap during pivot | at δ=90°, T=100% the turn-rate loop has no lever left — rate is set by hull drag/G only; verify water test shows acceptable peak deg/s |  
 | `(int16_t)` wrap in `Mode::set_steering` | **root-caused, fix prepared — pending commit** (§4.6 + §3.3). Upstream line: re-apply the constrain after any rebase. |  
 | `stop_vehicle` bypasses `Mode::set_steering` | harmless today (output clamp at `:1130`); unify after §4.6 lands (§4.7) |  
   
