@@ -127,6 +127,11 @@ public:
     void set_nav_context(bool nav) { _nav_context = nav; }
 	void set_pid_steering(bool en) { _pid_steering = en; }
 
+	// physical yaw-rate ceiling in rad/s, fed from ATC_STR_RAT_MAX by
+	// Mode::set_steering(); consumed by vectored_allocate()'s rotation-brake
+	// scaling. Guarded so a zero/disabled param never zeroes the scale.
+	void set_yaw_rate_max_rads(float rads) { if (rads > 0) { _yaw_rate_max_rads = rads; } }
+
     void set_nav_estimate_ne(const Vector2f &drift_ne);
 
     // seed the opposite-mode slot directly with an already-calibrated value
@@ -324,8 +329,10 @@ private:
     float   _vec_last_w;                  // last blend weight (w), held during deadband so throttle boost stays consistent
     AP_Int8 _vec_alloc;                   // VEC_ALLOC: 0 = stock vectored blend, 1 = unified allocator
     AP_Float _sfl_pivot_pct;              // SFL_PIVOT: raised floor throttle while yaw error >= SFL_IFRZ
+    AP_Float _vec_brk_pct;                // VEC_BRK: rotation-brake reverse thrust scale (%), 0 disables
     bool    _nav_context;                 // true if last steering request came from an autopilot mode
 	bool    _pid_steering;  // true when steering demand came through Mode::set_steering (closed-loop); manual bypass never sets it
+	float   _yaw_rate_max_rads = radians(24.0f);  // physical max turn rate; default = measured pivot plateau
     Vector2f _loiter_estimate_ne;           // Loiter-sourced drift estimate (m/s NE), gain applied
     uint32_t _loiter_estimate_ms;           // ms _loiter_estimate_ne last updated; 0=never
     Vector2f _nav_estimate_ne;           // Guided-sourced drift estimate (m/s, NE), gain applied

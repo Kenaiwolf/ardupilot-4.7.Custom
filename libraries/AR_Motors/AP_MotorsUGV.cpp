@@ -303,6 +303,14 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("SFL_PIVOT", 40, AP_MotorsUGV, _sfl_pivot_pct, 0.0f),
 
+    // @Param: VEC_BRK
+    // @DisplayName: Vectored rotation brake scale
+    // @Description: Scaling of the rotation-brake reverse thrust (%) in the unified allocator. 100 = nominal (|yaw rate|/16deg/s derated by reverse efficiency 0.8); 0 disables the brake; >100 allows stronger-than-nominal counter-thrust. Only active when the servo is at full deflection and the PID demands opposite rotation
+    // @Units: %
+    // @Range: 0 200
+    // @User: Advanced
+    AP_GROUPINFO("VEC_BRK", 41, AP_MotorsUGV, _vec_brk_pct, 100.0f),
+
     AP_GROUPEND
 };
 
@@ -437,6 +445,10 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
     // measured yaw rate (rad/s, earth frame = body yaw rate on a boat)
     const float yaw_rate_rads = AP::ahrs().get_yaw_rate_earth();
 
+	// physical turn-rate ceiling: fed from ATC_STR_RAT_MAX each cycle
+    // (falls back to the 24 deg/s default if the param is zero/disabled)
+    const float yaw_rate_max = _yaw_rate_max_rads;
+
     // policy gate: autonomous reverse allowed only while still moving forward
     // (active braking). reuses LOIT_DRF_MIN magnitude as the rest-speed threshold.
     // reverse at saturated deflection is rotation braking, not stern travel, and
@@ -503,17 +515,19 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // opposite to the measured yaw rate -> hull carries angular momentum
         // that closing the angle cannot remove. hold the angle, command T<0
         // (counter-torque), scaled by |omega| relative to the measured pivot
-        // rate (~24 deg/s) and derated by the measured reverse efficiency
-        // (ATC_DECEL_MAX/ATC_ACCEL_MAX = 0.8). active in autopilot modes
-        // (nav_mode) and in Acro (pid_steering), where throttle comes from the
-        // speed PID and the operator has no brake lever. excluded only in
-        // Manual, which must stay a pure RC passthrough
+        // rate (~16 deg/s steady-state) and derated by the measured reverse
+        // efficiency (ATC_DECEL_MAX/ATC_ACCEL_MAX = 0.8). MOT_VEC_BRK scales
+        // the magnitude (0 = brake off). active in autopilot modes (nav_mode)
+        // and in Acro (pid_steering), where throttle comes from the speed PID
+        // and the operator has no brake lever. excluded only in Manual, which
+        // must stay a pure RC passthrough
         if ((nav_mode || _pid_steering) &&
             fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
             (_vec_steering_filt * yaw_rate_rads) < 0.0f) {
-            const float yaw_rate_max = radians(24.0f);
+            const float yaw_rate_max = radians(16.0f);
             const float reverse_eff = 0.8f;
-            const float brake_frac = constrain_float(fabsf(yaw_rate_rads) / yaw_rate_max, 0.2f, 1.0f);
+            const float brake_scale = _vec_brk_pct * 0.01f;
+            const float brake_frac = constrain_float(fabsf(yaw_rate_rads) / yaw_rate_max, 0.2f, 1.0f) * brake_scale;
             throttle_norm = copysignf(fmaxf(fabsf(throttle_norm), brake_frac * reverse_eff), _vec_steering_filt);
         }
 
