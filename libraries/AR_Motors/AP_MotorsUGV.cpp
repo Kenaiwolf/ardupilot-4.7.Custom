@@ -721,11 +721,6 @@ void AP_MotorsUGV::output(bool armed, float ground_speed, float dt)
     // output_ methods are responsible for setting them to true if required on each iteration
     limit.steer_left = limit.steer_right = limit.throttle_lower = limit.throttle_upper = false;
 
-    // nav context is per-cycle: a mode must re-assert it every update, stale
-    // context must never silently persist into a manual-mode frame
-    const bool nav_context = _nav_context;
-    _nav_context = false;
-
     // sanity check parameters
     sanity_check_parameters();
 
@@ -755,6 +750,11 @@ void AP_MotorsUGV::output(bool armed, float ground_speed, float dt)
     srv.cork();
     SRV_Channels::output_ch_all();
     srv.push();
+
+    // nav context is per-cycle: a mode must re-assert it every update via
+    // Mode::set_steering(); clearing it here (after all output dispatch)
+    // means a stale true can never persist into a manual-mode frame
+    _nav_context = false;
 }
 
 // test steering or throttle output as a percentage of the total (range -100 to +100)
