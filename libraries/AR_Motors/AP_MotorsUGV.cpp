@@ -524,7 +524,6 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         if ((nav_mode || _pid_steering) &&
             fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
             (_vec_steering_filt * yaw_rate_rads) < 0.0f) {
-            const float yaw_rate_max = radians(16.0f);
             const float reverse_eff = 0.8f;
             const float brake_scale = _vec_brk_pct * 0.01f;
             const float brake_frac = constrain_float(fabsf(yaw_rate_rads) / yaw_rate_max, 0.2f, 1.0f) * brake_scale;
