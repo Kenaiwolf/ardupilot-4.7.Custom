@@ -1,0 +1,37 @@
+Vectored thrust — tuning/troubleshooting karta
+0. Pred každým testom
+MOT_VEC_ALLOC=0 jazda prvá — referenčný log. Ak niečo zlyhá neskôr, vieš prepnúť späť bez flashu. AP_MotorsUGV.cpp:437-443
+1. Pivot pomalý / nedotáča sa
+A: ω pri pivote nízka, žiadny overshoot → B: zvýš SFL_PIVOT (floor throttle pri saturovanom turn-rate), krok ~10-15%.
+A: aj pri SFL_PIVOT=100 je pivot pomalý → B: problém nie je floor, over ATC_STR_RAT_MAX (má byť fyzický strop ~24°/s z merania, nie 0).
+2. Pivot s veľkým overshootom (loď "vyjde do S")
+A: δ drží saturované dlho, žiadny T<0 v logu → B: brzda sa nespúšťa — skontroluj _pid_steering/nav_mode gate aktívny v danom móde (pozri bod 7).
+A: brzda sa spúšťa (T<0 viditeľné), ale overshoot stále veľký → B: zvýš MOT_VEC_BRK nad 100% (do 200%) — reverz je derátovaný reverse_eff=0.8, vyšší param kompenzuje. AP_MotorsUGV.cpp:517-530
+3. Loď "mikce"/cuká trupom pri prechode rotácia→brzda
+A: T skáče +100→-80→+60 skokovo → B: nie je priamy param (hardkód), zváž ATC_STR_DEC_MAX zvýšiť ako primárny útlm namiesto brzdy — brzda má byť poistka, nie hlavný nástroj.
+A: aj po #3 cuká → B: dočasne zníž MOT_VEC_BRK na 50-70% (slabší reverz, menej razantný prechod), akceptuj trochu väčší overshoot.
+4. Loď sa nechce zastaviť / preklápa smer pri cieli vzadu
+A: δ na limite a PID žiada opačný smer rotácie (counter-rotation) → brzda MUSÍ nabehnúť (n·ω<0 podmienka) AP_MotorsUGV.cpp:514-526
+A: overshoot pretrváva, PID ešte neotočil znamienko n → B: toto je medzera #2 (nechaná na test) — rieš cez ATC_STR_DEC_MAX/ATC_STR_ACC_MAX, NIE cez nový kód.
+5. Rýchly flip +/- throttle pri fx≈0 (fold boundary, ±90°)
+A: krátke prepnutie smeru motora pri nábehu/doběhu pivota, loď sa nehýbe → B: kozmeticky OK, nerieš kódom. Len ak:
+A: log ukáže desiatky/stovky prechodov → B: zvýš MOT_VEC_RESID_TC (filter demand vektora) — to utlmí chatter bez novej logiky. AP_MotorsUGV.cpp:463-473
+6. Reverz (cúvanie) sa nespustí, keď má
+A: nav_mode=true, fx_req<0, ale ground_speed <= LOIT_DRF_MIN → úmyselne zablokované (anti-cúvanie pri v≈0) AP_MotorsUGV.cpp:452-458 — B: to je dizajn, nie bug. Reverz z fold-u (brzdenie pri pohybe vpred) je stále legálny.
+7. Ktorý mód má čo aktívne
+Mód	Brzda (T<0)	SFL floor/PIVOT	No-reverse gate
+Manual	vždy off	off	off
+Acro	on (_pid_steering)	on (throttle je speed PID)	off
+Loiter/Guided/Auto	on (nav_mode)	on	on
+A: v Acro brzda nereaguje → over _pid_steering sa nastavuje v Mode::set_steering (mimo Manual) AP_MotorsUGV.cpp:520-524
+8. Rozhodovacie pravidlo zhrnutie (na mikro-kartičku)
+overshoot >30° a brzda nenaskočila        -> skontroluj nav_mode/_pid_steering gate pre daný mód  
+overshoot pretrváva aj s brzdou aktívnou  -> MOT_VEC_BRK hore (100->150->200%)  
+loď cuká/vibruje pri prechode cez brzdu   -> ATC_STR_DEC_MAX hore (primárny útlm), MOT_VEC_BRK dole  
+pivot pomalý a čistý (žiaden overshoot)   -> SFL_PIVOT hore  
+chatter na fold boundary (bez pohybu lode)-> MOT_VEC_RESID_TC hore, inak ignoruj  
+akékoľvek nečakané správanie              -> MOT_VEC_ALLOC=0 (okamžitý fallback na stock, bez flashu)  
+Zostávajúce otvorené (nie k riešeniu na vode, len na vedomie)
+reverse_eff=0.8 je hardkód, nie param.
+Authority normalization (α≈0.6-1.0 z tvojich meraní) — otvorená téma, netreba riešiť kódom teraz.
+Fold-chatter hysteréza — len ak #5 dáta ukážu, že VEC_RESID_TC nestačí.
