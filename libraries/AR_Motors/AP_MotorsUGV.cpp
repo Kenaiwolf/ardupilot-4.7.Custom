@@ -449,14 +449,6 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
     // (falls back to the 24 deg/s default if the param is zero/disabled)
     const float yaw_rate_max = _yaw_rate_max_rads;
 
-    // policy gate: autonomous reverse allowed only while still moving forward
-    // (active braking). reuses LOIT_DRF_MIN magnitude as the rest-speed threshold.
-    // reverse at saturated deflection is rotation braking, not stern travel, and
-    // stays legal - it is produced by the fold below only when fx_req<0 demands it
-    if (nav_mode && is_negative(fx_req) && (ground_speed <= _loit_drift_min)) {
-        fx_req = 0.0f;
-    }
-
     const float fx = constrain_float(fx_req, -1.0f, 1.0f);
     const float n  = constrain_float(n_req, -1.0f, 1.0f);
     const float vector_angle_max_rad = radians(constrain_float(_vector_angle_max, 0.0f, 90.0f));
