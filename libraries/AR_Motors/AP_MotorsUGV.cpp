@@ -318,6 +318,13 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("VEC_YAW_EXP", 42, AP_MotorsUGV, _vec_yaw_lin_expo, 1.67f),
 
+    // @Param: VEC_BRK_ASYM
+    // @DisplayName: Vectored braking asymmetry multiplier
+    // @Description: Multiplier applied to counter-thrust (braking) demand in the unified allocator, both rotation-brake and linear surge braking, to compensate reverse thrust being less efficient than forward thrust for the same deceleration. 1.0 = symmetric/off
+    // @Range: 1.0 2.0
+    // @User: Advanced
+    AP_GROUPINFO("VEC_BRK_ASYM", 43, AP_MotorsUGV, _vec_brk_asym, 1.25f),
+
     AP_GROUPEND
 };
 
@@ -519,23 +526,40 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             throttle_norm = -throttle_norm;
         }
 
+        // braking-demand asymmetry: reverse thrust is less efficient than
+        // forward for the same deceleration, so counter-thrust demand needs
+        // to be scaled UP (not down) by VEC_BRK_ASYM, measured from log data.
+        // applies identically to rotation brake (below) and linear surge
+        // braking (this block) - same physical motor, same asymmetry
+        const float brk_asym = MAX(_vec_brk_asym, 1.0f);
+
+        // linear surge brake: not at full deflection (surge-dominant, not
+        // yaw-dominant), vehicle is actually moving, and commanded thrust
+        // opposes current ground travel direction -> this is deceleration,
+        // not reverse travel. same autopilot-only gate as rotation brake
+        if ((nav_mode || _pid_steering) &&
+            fabsf(steering_angle_rad) < vector_angle_max_rad - 1e-4f &&
+            fabsf(ground_speed) > 0.05f &&
+            (ground_speed * throttle_norm) < 0.0f) {
+            throttle_norm = copysignf(fabsf(throttle_norm) * brk_asym, throttle_norm);
+        }
+
         // rotation brake: servo at full deflection AND PID demands rotation
         // opposite to the measured yaw rate -> hull carries angular momentum
         // that closing the angle cannot remove. hold the angle, command T<0
         // (counter-torque), scaled by |omega| relative to the measured pivot
-        // rate (~16 deg/s steady-state) and derated by the measured reverse
-        // efficiency (ATC_DECEL_MAX/ATC_ACCEL_MAX = 0.8). MOT_VEC_BRK scales
-        // the magnitude (0 = brake off). active in autopilot modes (nav_mode)
-        // and in Acro (pid_steering), where throttle comes from the speed PID
-        // and the operator has no brake lever. excluded only in Manual, which
-        // must stay a pure RC passthrough
+        // rate (~16 deg/s steady-state) and inflated by VEC_BRK_ASYM to
+        // compensate reverse thrust being less efficient than forward.
+        // MOT_VEC_BRK scales the magnitude (0 = brake off). active in
+        // autopilot modes (nav_mode) and in Acro (pid_steering), where
+        // throttle comes from the speed PID and the operator has no brake
+        // lever. excluded only in Manual, which must stay a pure RC passthrough
         if ((nav_mode || _pid_steering) &&
             fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
             (_vec_steering_filt * yaw_rate_rads) < 0.0f) {
-            const float reverse_eff = 0.8f;
             const float brake_scale = _vec_brk_pct * 0.01f;
             const float brake_frac = constrain_float(fabsf(yaw_rate_rads) / yaw_rate_max, 0.2f, 1.0f) * brake_scale;
-            throttle_norm = copysignf(fmaxf(fabsf(throttle_norm), brake_frac * reverse_eff), _vec_steering_filt);
+            throttle_norm = copysignf(fmaxf(fabsf(throttle_norm), brake_frac * brk_asym), _vec_steering_filt);
         }
 
         if (fabsf(steering_angle_rad) >= vector_angle_max_rad) {

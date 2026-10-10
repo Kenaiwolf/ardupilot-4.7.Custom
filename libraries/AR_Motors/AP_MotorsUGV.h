@@ -328,7 +328,8 @@ private:
     AP_Int8 _vec_alloc;                   // VEC_ALLOC: 0 = stock vectored blend, 1 = unified allocator
     AP_Float _sfl_pivot_pct;              // SFL_PIVOT: raised floor throttle while yaw error >= SFL_IFRZ
     AP_Float _vec_brk_pct;                // VEC_BRK: rotation-brake reverse thrust scale (%), 0 disables
-    AP_Float _vec_yaw_lin_expo;           // VEC_YAW_EXP: inverse-exponent linearization of yaw-dominant throttle demand, 1.0=off
+    AP_Float _vec_yaw_lin_expo;           // VEC_YAW_EXP: inverse-exponent linearization of yaw-dominant throttle demand, 1.0=off  
+    AP_Float _vec_brk_asym;               // VEC_BRK_ASYM: braking-demand multiplier (reverse thrust less efficient than forward), 1.0=off
     bool    _nav_context;                 // true if last steering request came from an autopilot mode
 	bool    _pid_steering;  // true when steering demand came through Mode::set_steering (closed-loop); manual bypass never sets it
 	float   _yaw_rate_max_rads = radians(24.0f);  // physical max turn rate; default = measured pivot plateau
