@@ -475,12 +475,12 @@ bool Mode::stop_vehicle()
     // send to motor
     g2.motors.set_throttle(throttle_out);
 
-    // do not turn while slowing down
-    float steering_out = 0.0;
-    if (!stopped) {
-        steering_out = attitude_control.get_steering_out_rate(0.0, g2.motors.limit.steer_left, g2.motors.limit.steer_right, rover.G_Dt);
-    }
-    g2.motors.set_steering(steering_out * 4500.0);
+    // do not turn while slowing down  
+    float steering_out = 0.0;  
+    if (!stopped) {  
+        steering_out = attitude_control.get_steering_out_rate(0.0, g2.motors.limit.steer_left, g2.motors.limit.steer_right, rover.G_Dt);  
+    }  
+    set_steering(steering_out * 4500.0);
 
     // return true once stopped
     return stopped;
