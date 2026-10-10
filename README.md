@@ -467,15 +467,11 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
   allocator should close δ and return cosδ to forward thrust. This is the  
   missing axis of the vectored control — current atan-boost approximates  
   it indirectly via 1/cos(δ) scaling |  
-| Nonlinear thrust effectiveness (rotation) | first ~10 deg/s at δ=90°  
-  is a spike (same physics as the 1.8-expo fix for forward accel);  
-  allocator should dose yaw moment via T·sin(δ) ramp, not flat T |
  | Reverse-gate definition | stern travel = sustained T<0 with |v|<eps  
-  AND |δ|<eps. T<0 opposing v or ω is braking — always legal |
-  Do to-do patrí „authority(v,δ) normalization" ako budúci krok allocatora, nie ako úprava SPD_EXPO.
-  „Authority normalization — PID outputs reinterpreted as acceleration/moment demands; allocator divides by measured authority(v,δ) curve. One gain set valid across speed range. Applies to both yaw and surge axes; reverse uses separate curve (decel/accel ≈ 0.8)."
-  To-do: rýchlostne závislý gain vo vectored_allocate (jedna premenná, nie nová slučka)  
-Do to-do: pomer accel/decel použiť pri budúcej transláčnej brzde (fx<0) — rotačná brzda už hotová, toto zostáva otvorené.  
+  AND |δ|<eps. T<0 opposing v or ω is braking — always legal |  
+  Do to-do patrí „authority(v,δ) normalization" ako budúci krok allocatora, nie ako úprava SPD_EXPO.  
+  „Authority normalization — PID outputs reinterpreted as acceleration/moment demands; allocator divides by measured authority(v,δ) curve. One gain set valid across speed range. Applies to both yaw and surge axes; reverse uses separate curve (decel/accel ≈ 0.8)."  
+  To-do: rýchlostne závislý gain vo vectored_allocate (jedna premenná, nie nová slučka)
 | `stop_vehicle` bypasses `Mode::set_steering` | harmless today (output clamp at `:1130`); unify after §4.6 lands (§4.7) |
 ---  
   
