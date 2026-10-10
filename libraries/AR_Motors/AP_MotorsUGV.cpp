@@ -311,6 +311,13 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("VEC_BRK", 41, AP_MotorsUGV, _vec_brk_pct, 100.0f),
 
+    // @Param: VEC_YAW_EXP
+    // @DisplayName: Vectored yaw thrust linearization exponent
+    // @Description: Inverse exponent (1/n) applied to the yaw-dominant throttle demand in the unified allocator to compensate measured nonlinear throttle->turn-rate response (fitted from log data, TurnRate_frac = ThrOut_frac^n). 1.0 = no linearization (raw demand passed through)
+    // @Range: 1.0 3.0
+    // @User: Advanced
+    AP_GROUPINFO("VEC_YAW_EXP", 42, AP_MotorsUGV, _vec_yaw_lin_expo, 1.67f),
+
     AP_GROUPEND
 };
 
@@ -495,7 +502,16 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         const float t_surge = (fabsf(cos_d) > 1e-3f) ? (_vec_throttle_filt / cos_d) : 0.0f;
         const float t_yaw   = (fabsf(sin_d) > 1e-3f) ? (_vec_steering_filt / sin_d) : 0.0f;
         const bool yaw_dominant = fabsf(t_yaw) > fabsf(t_surge);
-        throttle_norm = yaw_dominant ? t_yaw : t_surge;
+        if (yaw_dominant) {
+            // linearize: measured throttle->turn-rate response is sub-linear
+            // (TurnRate_frac ~= ThrOut_frac^n, n<1 from log fit); pre-warp the
+            // demand by the inverse exponent so achieved turn rate tracks the
+            // commanded fraction linearly. VEC_YAW_EXP=1.0 disables this.
+            const float expo = MAX(_vec_yaw_lin_expo, 1.0f);
+            throttle_norm = copysignf(powf(fabsf(t_yaw), expo), t_yaw);
+        } else {
+            throttle_norm = t_surge;
+        }
 
         // sign consistency after folding: if the demand pointed aft, thrust
         // must be negative at the folded angle to keep the same vector
