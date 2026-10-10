@@ -122,8 +122,6 @@ public:
     // Mode::apply_drift_compensation()/calc_throttle() must NOT apply any further gain to it.
     void set_loiter_estimate_ne(const Vector2f &drift_ne);
     // nav context: true while an autopilot mode is driving steering/throttle.
-    // set by Mode::set_steering() when allows_stick_mixing() is true; consumed
-    // by vectored_allocate()'s no-autonomous-reverse gate; cleared each output() cycle.
     void set_nav_context(bool nav) { _nav_context = nav; }
 	void set_pid_steering(bool en) { _pid_steering = en; }
 
