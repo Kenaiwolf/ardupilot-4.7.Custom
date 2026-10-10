@@ -323,7 +323,7 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @Description: Multiplier applied to counter-thrust (braking) demand in the unified allocator, both rotation-brake and linear surge braking, to compensate reverse thrust being less efficient than forward thrust for the same deceleration. 1.0 = symmetric/off
     // @Range: 1.0 2.0
     // @User: Advanced
-    AP_GROUPINFO("VEC_BRK_ASYM", 43, AP_MotorsUGV, _vec_brk_asym, 1.25f),
+    AP_GROUPINFO("VEC_BRK_ASYM", 43, AP_MotorsUGV, _vec_brk_asym, 1.24f),
 
     AP_GROUPEND
 };
@@ -533,15 +533,19 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // braking (this block) - same physical motor, same asymmetry
         const float brk_asym = MAX(_vec_brk_asym, 1.0f);
 
-        // linear surge brake: not at full deflection (surge-dominant, not
-        // yaw-dominant), vehicle is actually moving, and commanded thrust
-        // opposes current ground travel direction -> this is deceleration,
-        // not reverse travel. same autopilot-only gate as rotation brake
+        // linear surge brake-asymmetry: not at full deflection (surge-dominant,
+        // not yaw-dominant) and reverse thrust is being commanded -> apply the
+        // same forward/reverse efficiency correction as the rotation brake.
+        // no need to distinguish "braking" from "actually reversing": the
+        // motor-efficiency asymmetry is identical in both cases, so gating on
+        // ground_speed sign-mismatch only created a dead zone (while cruising
+        // in reverse, ground_speed and throttle_norm are both negative, so the
+        // old condition never fired even though the same correction applies).
+        // same autopilot-only gate as rotation brake
         if ((nav_mode || _pid_steering) &&
             fabsf(steering_angle_rad) < vector_angle_max_rad - 1e-4f &&
-            fabsf(ground_speed) > 0.05f &&
-            (ground_speed * throttle_norm) < 0.0f) {
-            throttle_norm = copysignf(fabsf(throttle_norm) * brk_asym, throttle_norm);
+            throttle_norm < 0.0f) {
+            throttle_norm *= brk_asym;
         }
 
         // rotation brake: servo at full deflection AND PID demands rotation
