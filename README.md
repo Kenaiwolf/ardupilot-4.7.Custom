@@ -295,12 +295,6 @@ steering_value = channel_steer->stick_mixing((int16_t)constrain_float(steering_v
   
 Plus the defense-in-depth clamp in §3.3. Affects **every** autopilot mode (`is_autopilot_mode()=true`) whenever `STICK_MIXING>0` and the heading PID saturates — not just Loiter. Interaction with fork features is positive: §5.3's `get_steering()/4500` normalization and §2.1's `steering_norm` blend both assume ±4500 and currently receive wrapped garbage.  
   
-### 4.7 Related — `stop_vehicle` bypass  
-  
-`Mode::stop_vehicle` (`mode.cpp:475`) calls `g2.motors.set_steering(steering_out * 4500.0)` **directly**, bypassing `Mode::set_steering`. Harmless today (servo output is clamped at `AP_MotorsUGV.cpp:1130`), but worth unifying so all steering output flows through one path.  
-  
----  
-  
 ## 5. `Rover/mode_loiter.cpp`  
   
 Loiter is the second drift source and the main beneficiary of compensation.  
