@@ -480,9 +480,9 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
   AND |δ|<eps. T<0 opposing v or ω is braking — always legal |
   Do to-do patrí „authority(v,δ) normalization" ako budúci krok allocatora, nie ako úprava SPD_EXPO.
   „Authority normalization — PID outputs reinterpreted as acceleration/moment demands; allocator divides by measured authority(v,δ) curve. One gain set valid across speed range. Applies to both yaw and surge axes; reverse uses separate curve (decel/accel ≈ 0.8)."
-  To-do: rýchlostne závislý gain vo vectored_allocate (jedna premenná, nie nová slučka)
-| `stop_vehicle` bypasses `Mode::set_steering` | harmless today (output clamp at `:1130`); unify after §4.6 lands (§4.7) |  
-  
+  To-do: rýchlostne závislý gain vo vectored_allocate (jedna premenná, nie nová slučka)  
+Do to-do: pomer accel/decel použiť pri budúcej transláčnej brzde (fx<0) — rotačná brzda už hotová, toto zostáva otvorené.  
+| `stop_vehicle` bypasses `Mode::set_steering` | harmless today (output clamp at `:1130`); unify after §4.6 lands (§4.7) |
 ---  
   
 *Caveat: line numbers were taken from git HEAD blame/diffs; the repo search index lags HEAD so exact lines may drift ±a few. `extra_hwdef.dat` and parameter default values were summarized rather than read line-by-line — verify defaults against `AP_MotorsUGV.cpp` `AP_GROUPINFO` table before publishing externally.*  
