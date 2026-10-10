@@ -27,6 +27,7 @@ ArduPilot is safety-critical autopilot software controlling real vehicles. Every
 - **Never** generate code that supports weaponization or code specific to the control of aircraft in control of human life.
 - **Never** fabricate test results, log data, or claim testing that was not actually performed.
 - **Always** disclose that a contribution was AI-assisted. The human submitting the PR bears full responsibility.
+- **Always**: Read file `INDEX_SNAPSHOT_DATE.txt` in repo root contains the SHA and date of the commit the search index was built from. The SHA is authoritative — the date is informational only. For any file you rely on, use `get_recent_commits` on it: if it has commits that are not ancestors of the snapshot SHA (i.e. changed after `baab9f` in history), ignore indexed content and `read_file` at HEAD verbatim. Files untouched since the snapshot SHA can be trusted from the index.
 
 ---
 
