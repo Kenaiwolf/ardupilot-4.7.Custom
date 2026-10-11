@@ -341,16 +341,6 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("VEC_BLD_STRT", 45, AP_MotorsUGV, _vec_bld_strt_deg, 70.0f),
 
-	// @Param: VEC_BLD_END
-    // @DisplayName: Vectored throttle-blend end angle
-    // @Description: Steering angle (deg) at which the blend weight reaches 1.0 (full VEC_YAW_EXP effect, pivot-style throttle). Must be greater than VEC_BLD_START
-    // @Units: deg
-    // @Range: 0.0 90.0
-    // @User: Advanced
-    AP_GROUPINFO("VEC_BLD_END", 46, AP_MotorsUGV, _vec_bld_end_deg, 80.0f),
-
-    AP_GROUPEND
-
     AP_GROUPEND
 };
 
@@ -547,7 +537,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // throttle). Blend-end is derived, not a separate tunable, so the
         // two angles the floor and the blend key off cannot drift apart.
         const float bld_end_deg = 90.0f - _vec_cos_flr_deg;
-        const float bld_start_deg = MIN(_vec_bld_start_deg, bld_end_deg - 0.1f);
+        const float bld_start_deg = MIN(_vec_bld_strt_deg, bld_end_deg - 0.1f);
         const float angle_deg = degrees(fabsf(steering_angle_rad));
         const float angle_ratio = (bld_end_deg > bld_start_deg) ?
             constrain_float((angle_deg - bld_start_deg) / (bld_end_deg - bld_start_deg), 0.0f, 1.0f) : 1.0f;
