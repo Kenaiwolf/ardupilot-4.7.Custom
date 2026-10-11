@@ -508,22 +508,28 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         }
         steering_angle_rad = constrain_float(delta, -vector_angle_max_rad, vector_angle_max_rad);
 
-        // magnitude: polar decomposition. (fx,n) = vec_mag*(cos(delta),
-        // sin(delta)) by construction of atan2(), so vec_mag IS the correct
-        // thrust magnitude for any delta - no division, no dominant-axis
-        // switch, no discontinuity. exact as long as the angle clamp above
-        // never engages (true today: MOT_VEC_ANGLEMAX=90, fold already keeps
-        // delta within +/-90 before the clamp). if VEC_ANGLEMAX is ever
-        // lowered below 90, the clamp becomes active and this magnitude is an
-        // approximation (saturated residual no longer spilled to throttle) -
-        // not relevant to the current configuration.
-        throttle_norm = vec_mag;
+        // magnitude: fx/cos(delta) generalizes vec_mag to the case where the
+        // angle clamp above actually engaged (VEC_ANGLEMAX<90): if delta was
+        // NOT clamped, fx = vec_mag*cos(delta) exactly (atan2 construction),
+        // so this collapses to vec_mag with zero behavior change at the
+        // current MOT_VEC_ANGLEMAX=90 default. cos_safe prevents the
+        // division singularity as |delta| -> 90 deg; VEC_COS_FLOOR=0
+        // reproduces the legacy 1e-3f hard-threshold behavior.
+        const float cos_d = cosf(steering_angle_rad);
+        const float cos_floor = sinf(radians(_vec_cos_floor_deg));  // cos(90-floor_deg)
+        const float cos_safe = fmaxf(fabsf(cos_d), is_positive(_vec_cos_floor_deg) ? cos_floor : 1e-3f);
+        const float t_vector = _vec_throttle_filt / copysignf(cos_safe, cos_d);
 
-        // sign consistency after folding: if the demand pointed aft, thrust
-        // must be negative at the folded angle to keep the same vector
-        if (is_negative(_vec_throttle_filt) && is_positive(throttle_norm)) {
-            throttle_norm = -throttle_norm;
-        }
+        // VEC_YAW_EXP reattachment: continuous blend weight w, 0 at pure
+        // surge (delta=0) to 1 at pure pivot (|delta|=vector_angle_max_rad).
+        // smooth (sin^2) so there is no discontinuity at any intermediate
+        // angle, unlike the old binary yaw_dominant switch. VEC_YAW_EXP=1.0
+        // makes expo=1 everywhere, i.e. fully disables this (t_vector passed
+        // through unchanged, matching current committed behavior exactly).
+        const float angle_ratio = constrain_float(fabsf(steering_angle_rad) / vector_angle_max_rad, 0.0f, 1.0f);
+        const float w = sq(sinf(angle_ratio * M_PI_2));
+        const float expo = 1.0f + (MAX(_vec_yaw_lin_expo, 1.0f) - 1.0f) * w;
+        throttle_norm = copysignf(powf(fabsf(t_vector), expo), t_vector);
 
         // braking-demand asymmetry: reverse thrust is less efficient than
         // forward for the same deceleration, so counter-thrust demand needs
