@@ -1,6 +1,6 @@
 Vectored thrust — tuning/troubleshooting karta
 0. Pred každým testom
-MOT_VEC_ALLOC=0 jazda prvá — referenčný log. Ak niečo zlyhá neskôr, vieš prepnúť späť bez flashu. AP_MotorsUGV.cpp:437-443
+MOT_VEC_FOSSEN=0 jazda prvá — referenčný log. Ak niečo zlyhá neskôr, vieš prepnúť späť bez flashu (VEC_FOSSEN=0 aj automaticky obnoví SFL floor/cosine reduction). AP_MotorsUGV.cpp:437-443
 1. Pivot pomalý / nedotáča sa
 A: ω pri pivote nízka, žiadny overshoot → B: zvýš SFL_PIVOT (floor throttle pri saturovanom turn-rate), krok ~10-15%.
 A: aj pri SFL_PIVOT=100 je pivot pomalý → B: problém nie je floor, over ATC_STR_RAT_MAX (má byť fyzický strop ~24°/s z merania, nie 0).
@@ -25,12 +25,12 @@ Acro	on (_pid_steering)	on (throttle je speed PID)	off
 Loiter/Guided/Auto	on (nav_mode)	on	on
 A: v Acro brzda nereaguje → over _pid_steering sa nastavuje v Mode::set_steering (mimo Manual) AP_MotorsUGV.cpp:520-524
 8. Rozhodovacie pravidlo zhrnutie (na mikro-kartičku)
-overshoot >30° a brzda nenaskočila        -> skontroluj nav_mode/_pid_steering gate pre daný mód  
-overshoot pretrváva aj s brzdou aktívnou  -> MOT_VEC_BRK hore (100->150->200%)  
-loď cuká/vibruje pri prechode cez brzdu   -> ATC_STR_DEC_MAX hore (primárny útlm), MOT_VEC_BRK dole  
-pivot pomalý a čistý (žiaden overshoot)   -> SFL_PIVOT hore  
-chatter na fold boundary (bez pohybu lode)-> MOT_VEC_RESID_TC hore, inak ignoruj  
-akékoľvek nečakané správanie              -> MOT_VEC_ALLOC=0 (okamžitý fallback na stock, bez flashu)  
+overshoot >30° a brzda nenaskočila        -> skontroluj nav_mode/_pid_steering gate pre daný mód
+overshoot pretrváva aj s brzdou aktívnou  -> MOT_VEC_BRK hore (100->150->200%)
+loď cuká/vibruje pri prechode cez brzdu   -> ATC_STR_DEC_MAX hore (primárny útlm), MOT_VEC_BRK dole
+pivot pomalý a čistý (žiaden overshoot)   -> SFL_PIVOT hore
+chatter na fold boundary (bez pohybu lode)-> MOT_VEC_RESID_TC hore, inak ignoruj
+akékoľvek nečakané správanie              -> MOT_VEC_ALLOC=0 (okamžitý fallback na stock, bez flashu)
 Zostávajúce otvorené (nie k riešeniu na vode, len na vedomie)
 reverse_eff=0.8 je hardkód, nie param.
 Authority normalization (α≈0.6-1.0 z tvojich meraní) — otvorená téma, netreba riešiť kódom teraz.
