@@ -542,6 +542,8 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         const float angle_ratio = (bld_end_deg > bld_start_deg) ?
             constrain_float((angle_deg - bld_start_deg) / (bld_end_deg - bld_start_deg), 0.0f, 1.0f) : 1.0f;
         const float w = sq(sinf(angle_ratio * M_PI_2));
+		const float t_pivot = vec_mag;  // or equivalent pivot-style magnitude
+        throttle_norm = t_vector * (1.0f - w) + t_pivot * w;
 
         // braking-demand asymmetry: reverse thrust is less efficient than
         // forward for the same deceleration, so counter-thrust demand needs
