@@ -288,12 +288,12 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("DRIFT_EST_YR", 38, AP_MotorsUGV, _drift_est_yaw_rate_dps, 15.0f),
 
-    // @Param: VEC_ALLOC
-    // @DisplayName: Vectored thrust unified allocator
-    // @Description: 0 = stock blended atan/direct mapping in output_regular; 1 = unified allocator mapping (surge force, yaw moment) to thruster angle+throttle. Braking-only reverse policy for autonomous modes is enforced inside the allocator
+    // @Param: VEC_FOSSEN
+    // @DisplayName: Fossen-style vectored thrust unified allocator
+    // @Description: 0 = stock blended atan/direct mapping in output_regular, legacy steering-thrust floor (SFL_*) and cosine throttle reduction remain active; 1 = unified allocator mapping (surge force, yaw moment) to thruster angle+throttle. Braking-only reverse policy for autonomous modes is enforced inside the allocator. Mutually exclusive with SFL floor/cosine reduction - enabling this automatically disables them to avoid double throttle compensation
     // @Values: 0:Disabled,1:Enabled
     // @User: Advanced
-    AP_GROUPINFO("VEC_ALLOC", 39, AP_MotorsUGV, _vec_alloc, 0),
+    AP_GROUPINFO("VEC_FOSSEN", 39, AP_MotorsUGV, _vec_fossen, 0),
 
     // @Param: SFL_PIVOT
     // @DisplayName: Steering-floor pivot level
@@ -1168,8 +1168,8 @@ void AP_MotorsUGV::output_regular(bool armed, float ground_speed, float steering
         if (_scale_steering) {
             // vectored thrust handling
             if (have_vectored_thrust()) {
-                if (_vec_alloc > 0) {
-                    // unified allocator path (VEC_ALLOC=1): identical math lives in vectored_allocate()
+                if (_vec_fossen > 0) {
+                    // unified allocator path (VEC_FOSSEN=1): identical math lives in vectored_allocate()
                     vectored_allocate(throttle * 0.01f, steering * (1.0f/4500.0f), ground_speed,
                                       _nav_context, steering, throttle, dt);
                 } else {

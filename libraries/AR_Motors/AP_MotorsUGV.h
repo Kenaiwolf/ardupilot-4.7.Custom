@@ -95,6 +95,7 @@ public:
     float get_vector_angle_max() const { return _vector_angle_max; }
 
     // steering-floor / loiter-drift tunable getters (used by Mode::calc_throttle and ModeLoiter)
+    bool get_vec_fossen() const { return _vec_fossen > 0; }
     float get_steer_floor_deadband_deg() const { return _sfl_deadband_deg; }
     float get_steer_floor_gain()             const { return _sfl_gain; }
     float get_steer_floor_max_pct()          const { return _sfl_max_pct; }
@@ -325,10 +326,10 @@ private:
 	float   _vec_steering_filt;   // low-pass filtered steering_norm, same time constant as _vec_throttle_filt
     float   _vec_last_steering_angle_rad; // last commanded vectored-thrust steering angle (rad), held during deadband
     float   _vec_last_w;                  // last blend weight (w), held during deadband so throttle boost stays consistent
-    AP_Int8 _vec_alloc;                   // VEC_ALLOC: 0 = stock vectored blend, 1 = unified allocator
+    AP_Int8 _vec_fossen;                  // VEC_FOSSEN: 0 = stock vectored blend + SFL floor/cosine reduction active, 1 = Fossen unified allocator (floor/cosine reduction auto-disabled)
     AP_Float _sfl_pivot_pct;              // SFL_PIVOT: raised floor throttle while yaw error >= SFL_IFRZ
     AP_Float _vec_brk_pct;                // VEC_BRK: rotation-brake reverse thrust scale (%), 0 disables
-    AP_Float _vec_yaw_lin_expo;           // VEC_YAW_EXP: inverse-exponent linearization of yaw-dominant throttle demand, 1.0=off  
+    AP_Float _vec_yaw_lin_expo;           // VEC_YAW_EXP: inverse-exponent linearization of yaw-dominant throttle demand, 1.0=off
     AP_Float _vec_brk_asym;               // VEC_BRK_ASYM: braking-demand multiplier (reverse thrust less efficient than forward), 1.0=off
     bool    _nav_context;                 // true if last steering request came from an autopilot mode
 	bool    _pid_steering;  // true when steering demand came through Mode::set_steering (closed-loop); manual bypass never sets it
