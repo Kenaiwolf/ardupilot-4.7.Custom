@@ -325,13 +325,31 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("VEC_BRK_ASYM", 43, AP_MotorsUGV, _vec_brk_asym, 1.24f),
 
-    // @Param: VEC_COS_FLOOR
+    // @Param: VEC_COS_FLR
     // @DisplayName: Vectored cosine-singularity floor angle
     // @Description: Angular margin (deg) from the mechanical 90 deg stop within which the cos(delta)-based magnitude floor engages, preventing the division/magnitude blow-up as delta approaches 90 deg. 0 disables (legacy 1e-3f hard threshold behavior)
     // @Units: deg
     // @Range: 0.0 30.0
     // @User: Advanced
-    AP_GROUPINFO("VEC_COS_FLOOR", 44, AP_MotorsUGV, _vec_cos_floor_deg, 15.0f),
+    AP_GROUPINFO("VEC_COS_FLR", 44, AP_MotorsUGV, _vec_cos_flr_deg, 10.0f),
+
+	// @Param: VEC_BLD_STRT
+    // @DisplayName: Vectored throttle-blend start angle
+    // @Description: Steering angle (deg) below which throttle is pure surge/yaw geometric decomposition (VEC_YAW_EXP has zero effect).
+    // @Units: deg
+    // @Range: 0.0 90.0
+    // @User: Advanced
+    AP_GROUPINFO("VEC_BLD_STRT", 45, AP_MotorsUGV, _vec_bld_strt_deg, 70.0f),
+
+	// @Param: VEC_BLD_END
+    // @DisplayName: Vectored throttle-blend end angle
+    // @Description: Steering angle (deg) at which the blend weight reaches 1.0 (full VEC_YAW_EXP effect, pivot-style throttle). Must be greater than VEC_BLD_START
+    // @Units: deg
+    // @Range: 0.0 90.0
+    // @User: Advanced
+    AP_GROUPINFO("VEC_BLD_END", 46, AP_MotorsUGV, _vec_bld_end_deg, 80.0f),
+
+    AP_GROUPEND
 
     AP_GROUPEND
 };
@@ -513,23 +531,27 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // NOT clamped, fx = vec_mag*cos(delta) exactly (atan2 construction),
         // so this collapses to vec_mag with zero behavior change at the
         // current MOT_VEC_ANGLEMAX=90 default. cos_safe prevents the
-        // division singularity as |delta| -> 90 deg; VEC_COS_FLOOR=0
+        // division singularity as |delta| -> 90 deg; VEC_COS_FLR=0
         // reproduces the legacy 1e-3f hard-threshold behavior.
         const float cos_d = cosf(steering_angle_rad);
-        const float cos_floor = sinf(radians(_vec_cos_floor_deg));  // cos(90-floor_deg)
-        const float cos_safe = fmaxf(fabsf(cos_d), is_positive(_vec_cos_floor_deg) ? cos_floor : 1e-3f);
+        const float cos_floor = sinf(radians(_vec_cos_flr_deg));  // cos(90-floor_deg)
+        const float cos_safe = fmaxf(fabsf(cos_d), is_positive(_vec_cos_flr_deg) ? cos_floor : 1e-3f);
         const float t_vector = _vec_throttle_filt / copysignf(cos_safe, cos_d);
 
-        // VEC_YAW_EXP reattachment: continuous blend weight w, 0 at pure
-        // surge (delta=0) to 1 at pure pivot (|delta|=vector_angle_max_rad).
-        // smooth (sin^2) so there is no discontinuity at any intermediate
-        // angle, unlike the old binary yaw_dominant switch. VEC_YAW_EXP=1.0
-        // makes expo=1 everywhere, i.e. fully disables this (t_vector passed
-        // through unchanged, matching current committed behavior exactly).
-        const float angle_ratio = constrain_float(fabsf(steering_angle_rad) / vector_angle_max_rad, 0.0f, 1.0f);
+        // VEC_YAW_EXP reattachment: two-zone blend weight w. Below
+        // VEC_BLD_START, w=0 (pure surge-cos(delta) geometry, VEC_YAW_EXP
+        // has zero effect). Between VEC_BLD_START and the derived blend-end
+        // (90-VEC_COS_FLR -- the same angle where the cosine floor itself
+        // starts engaging), w ramps 0->1 via sin^2 (no slope discontinuity
+        // at either boundary). Above blend-end, w=1 (full pivot-style
+        // throttle). Blend-end is derived, not a separate tunable, so the
+        // two angles the floor and the blend key off cannot drift apart.
+        const float bld_end_deg = 90.0f - _vec_cos_flr_deg;
+        const float bld_start_deg = MIN(_vec_bld_start_deg, bld_end_deg - 0.1f);
+        const float angle_deg = degrees(fabsf(steering_angle_rad));
+        const float angle_ratio = (bld_end_deg > bld_start_deg) ?
+            constrain_float((angle_deg - bld_start_deg) / (bld_end_deg - bld_start_deg), 0.0f, 1.0f) : 1.0f;
         const float w = sq(sinf(angle_ratio * M_PI_2));
-        const float expo = 1.0f + (MAX(_vec_yaw_lin_expo, 1.0f) - 1.0f) * w;
-        throttle_norm = copysignf(powf(fabsf(t_vector), expo), t_vector);
 
         // braking-demand asymmetry: reverse thrust is less efficient than
         // forward for the same deceleration, so counter-thrust demand needs
