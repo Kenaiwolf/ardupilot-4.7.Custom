@@ -32,6 +32,5 @@ pivot pomalý a čistý (žiaden overshoot)   -> SFL_PIVOT hore
 chatter na fold boundary (bez pohybu lode)-> MOT_VEC_RESID_TC hore, inak ignoruj
 akékoľvek nečakané správanie              -> MOT_VEC_FOSSEN=0 (okamžitý fallback na stock, bez flashu)
 Zostávajúce otvorené (nie k riešeniu na vode, len na vedomie)
-reverse_eff=0.8 je hardkód, nie param.
 Authority normalization (α≈0.6-1.0 z tvojich meraní) — otvorená téma, netreba riešiť kódom teraz.
 Fold-chatter hysteréza — len ak #5 dáta ukážu, že VEC_RESID_TC nestačí.
