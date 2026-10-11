@@ -387,12 +387,14 @@ void Mode::calc_throttle(float target_speed, bool avoidance_enabled)
     // NOTE: cosine reduction runs on the PID part only - drift-FF is added
     // AFTER it below, otherwise FF would be zeroed exactly at large crab
     // angles where drift-hold needs it most
-    if (g2.motors.have_vectored_thrust() && steering_heading_fresh) {
+    if (g2.motors.have_vectored_thrust() && steering_heading_fresh && !g2.motors.get_vec_fossen()) {
 
         // 1. Cosine Throttle Reduction: reduce forward throttle at large heading error.
         // only scale forward thrust - a negative (braking) PID demand must pass
         // through unchanged, otherwise a heavy boat cannot decelerate during a
         // large heading change
+        // Disabled when VEC_FOSSEN=1: the Fossen allocator (vectored_allocate())
+        // already performs this reduction internally via the polar decomposition
         if (is_positive(throttle_out)) {
             throttle_out *= MAX(0.0f, cosf(yaw_error_rad));
         }
@@ -421,8 +423,11 @@ void Mode::calc_throttle(float target_speed, bool avoidance_enabled)
         }
     }
 
-    if (g2.motors.have_vectored_thrust() && steering_heading_fresh) {
+    if (g2.motors.have_vectored_thrust() && steering_heading_fresh && !g2.motors.get_vec_fossen()) {
         // 2. Steering Thrust Floor: force minimum throttle to allow rotation
+        // Disabled when VEC_FOSSEN=1: the Fossen allocator supplies its own
+        // throttle floor via the (Fx,N)->T magnitude, this legacy floor would
+        // double-apply on top of it
         if (yaw_error_deg > g2.motors.get_steer_floor_deadband_deg()) {
             float steer_throttle_floor = constrain_float(
                 (yaw_error_deg - g2.motors.get_steer_floor_deadband_deg()) * g2.motors.get_steer_floor_gain(),
