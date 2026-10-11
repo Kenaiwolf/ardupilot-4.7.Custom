@@ -325,6 +325,14 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("VEC_BRK_ASYM", 43, AP_MotorsUGV, _vec_brk_asym, 1.24f),
 
+    // @Param: VEC_COS_FLOOR
+    // @DisplayName: Vectored cosine-singularity floor angle
+    // @Description: Angular margin (deg) from the mechanical 90 deg stop within which the cos(delta)-based magnitude floor engages, preventing the division/magnitude blow-up as delta approaches 90 deg. 0 disables (legacy 1e-3f hard threshold behavior)
+    // @Units: deg
+    // @Range: 0.0 30.0
+    // @User: Advanced
+    AP_GROUPINFO("VEC_COS_FLOOR", 44, AP_MotorsUGV, _vec_cos_floor_deg, 15.0f),
+
     AP_GROUPEND
 };
 
