@@ -485,6 +485,16 @@ bool Mode::stop_vehicle()
     if (!stopped) {
         steering_out = attitude_control.get_steering_out_rate(0.0, g2.motors.limit.steer_left, g2.motors.limit.steer_right, rover.G_Dt);
     }
+    // stop_vehicle() is only ever called from autopilot modes (Auto/Guided/RTL/
+    // SmartRTL/Follow/Circle/Dock, verified via is_autopilot_mode() override
+    // audit) or AR_WPNav_OA's avoidance-stop, never from Manual/Acro/Steering.
+    // Bypass Mode::set_steering() here deliberately (its stick-mixing re-read
+    // of the RC channel and slew/wrap handling are irrelevant/unsafe during a
+    // controlled stop), but still assert the same nav/brake-policy flags it
+    // would have set, so vectored_allocate()'s no-reverse/brake gating applies
+    // correctly during this phase instead of running on stale flag state.
+    g2.motors.set_nav_context(true);
+    g2.motors.set_pid_steering(true);
     g2.motors.set_steering(steering_out * 4500.0);
 
     // return true once stopped
