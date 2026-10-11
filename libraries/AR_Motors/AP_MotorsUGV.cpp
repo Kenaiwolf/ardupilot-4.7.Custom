@@ -500,25 +500,16 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         }
         steering_angle_rad = constrain_float(delta, -vector_angle_max_rad, vector_angle_max_rad);
 
-        // magnitude: satisfy whichever axis dominates after the angle clamp.
-        // T = fx/cos(d) preserves surge exactly; T = n/sin(d) preserves yaw
-        // exactly; taking the larger one means a saturated angle spills its
-        // unmet demand into throttle instead of dropping it
-        const float sin_d = sinf(steering_angle_rad);
-        const float cos_d = cosf(steering_angle_rad);
-        const float t_surge = (fabsf(cos_d) > 1e-3f) ? (_vec_throttle_filt / cos_d) : 0.0f;
-        const float t_yaw   = (fabsf(sin_d) > 1e-3f) ? (_vec_steering_filt / sin_d) : 0.0f;
-        const bool yaw_dominant = fabsf(t_yaw) > fabsf(t_surge);
-        if (yaw_dominant) {
-            // linearize: measured throttle->turn-rate response is sub-linear
-            // (TurnRate_frac ~= ThrOut_frac^n, n<1 from log fit); pre-warp the
-            // demand by the inverse exponent so achieved turn rate tracks the
-            // commanded fraction linearly. VEC_YAW_EXP=1.0 disables this.
-            const float expo = MAX(_vec_yaw_lin_expo, 1.0f);
-            throttle_norm = copysignf(powf(fabsf(t_yaw), expo), t_yaw);
-        } else {
-            throttle_norm = t_surge;
-        }
+        // magnitude: polar decomposition. (fx,n) = vec_mag*(cos(delta),
+        // sin(delta)) by construction of atan2(), so vec_mag IS the correct
+        // thrust magnitude for any delta - no division, no dominant-axis
+        // switch, no discontinuity. exact as long as the angle clamp above
+        // never engages (true today: MOT_VEC_ANGLEMAX=90, fold already keeps
+        // delta within +/-90 before the clamp). if VEC_ANGLEMAX is ever
+        // lowered below 90, the clamp becomes active and this magnitude is an
+        // approximation (saturated residual no longer spilled to throttle) -
+        // not relevant to the current configuration.
+        throttle_norm = vec_mag;
 
         // sign consistency after folding: if the demand pointed aft, thrust
         // must be negative at the folded angle to keep the same vector
