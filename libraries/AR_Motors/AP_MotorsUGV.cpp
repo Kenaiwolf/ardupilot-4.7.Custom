@@ -534,13 +534,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
     float steering_angle_rad;
     float throttle_norm;
 
-    if (vec_mag < _vec_deadband) {
-        // negligible demand on both axes: freeze the angle to suppress jitter
-        // and output zero thrust. hard floor only, well below VEC_BLND_THR -
-        // the blend below is now the primary anti-jitter mechanism
-        steering_angle_rad = _vec_last_steering_angle_rad;
-        throttle_norm = 0.0f;
-    } else {
+    {
         // desired thrust direction in (surge, yaw) space
         float delta = atan2f(_vec_steering_filt, _vec_throttle_filt);
 
@@ -654,8 +648,14 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // could - it is always genuine counter-rotation reverse thrust.
         // MOT_VEC_BRK scales the magnitude (0 = brake off). active in
         // autopilot modes (nav_mode) and in Acro (pid_steering); excluded in
-        // Manual, which must stay a pure RC passthrough
+        // Manual, which must stay a pure RC passthrough.
+        // vec_mag >= _vec_deadband guard: without it, pure sensor/filter
+        // noise at near-zero demand could set steering_angle_rad near +-90
+        // via atan2 for one tick and latch the brake on noise alone - the
+        // deadband S-blend below will suppress the *output* either way, but
+        // the latch itself would persist into the next tick without this
         const bool rot_brake_trigger = (nav_mode || _pid_steering) &&
+            vec_mag >= _vec_deadband &&
             fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
             (n * yaw_rate_rads) < 0.01f;
 
@@ -683,6 +683,21 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             const float brake_frac = fabsf(n) * brake_scale;
             throttle_norm = copysignf(brake_frac * brk_asym, n);
         }
+
+        // deadband S-curve blend: fade smoothly from the frozen hold-state
+        // (last steering angle, zero throttle) up to the fully-computed
+        // output above as vec_mag crosses VEC_DEADBAND, instead of the old
+        // hard on/off switch - same sin^2 family as every other blend in
+        // this function. w_db=0 well inside the deadband (pure hold, no
+        // jitter reaches the servo/throttle), w_db=1 at/above VEC_DEADBAND
+        // (identical to current behavior there, zero added lag)
+        float w_db = 1.0f;
+        if (is_positive(_vec_deadband)) {
+            const float db_ratio = constrain_float(vec_mag / _vec_deadband, 0.0f, 1.0f);
+            w_db = sq(sinf(db_ratio * M_PI_2));
+        }
+        steering_angle_rad = w_db * steering_angle_rad + (1.0f - w_db) * _vec_last_steering_angle_rad;
+        throttle_norm *= w_db;
 
         if (fabsf(steering_angle_rad) >= vector_angle_max_rad) {
             limit.steer_right = true;
