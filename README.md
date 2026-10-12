@@ -94,7 +94,7 @@ Then a shared staleness cutoff `DRIFT_MAXAGE` (default 1800 s, 0 = never trust) 
 
 All new params live in `AP_MotorsUGV` under the `MOT_`/`LOIT_`/`DRIFT_`/`SFL_` prefixes — see §9 table.
 
-ified vectored-thrust al`2.5 Unified vectored-thrust allocator, Fossen-style (VEC_FOSSEN)`
+### 2.5 Unified vectored-thrust allocator, Fossen-style (`VEC_FOSSEN`)  
 
 Renamed from VEC_ALLOC on 2026-10-11 (same param index 39) when the allocator's underlying math was reworked toward a Fossen-style formulation; the rename may not be purely cosmetic, re-verify behavior against this section's description rather than assuming VEC_ALLOC=1 behavior carried over unchanged. Requires MOT_VEC_ANGLEMAX=90. vectored_allocate() is an alternative output path (gated by VEC_FOSSEN=1) that replaces the §2.1 blend with a single continuous allocation: the (fx_req, n_req) demand (normalized surge force / yaw moment, both ±1) is treated as one thrust vector whose direction picks the thruster angle and whose magnitude/dominant axis picks throttle, via atan2 — no separate 0°/45°/90° regimes, so saturation folds unmet demand into the other axis instead of dropping it. Enabling VEC_FOSSEN=1 automatically disables the legacy SFL steering-thrust floor and cosine throttle reduction (§2.1/§3) to avoid double throttle compensation — this interaction is not optional and should be stated explicitly, not left implicit.locator 
 
