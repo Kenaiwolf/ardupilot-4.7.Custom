@@ -102,8 +102,10 @@ All new params live in `AP_MotorsUGV` under the `MOT_`/`LOIT_`/`DRIFT_`/`SFL_` p
 void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_speed,
                                      bool nav_mode, float &steering_cd, float &throttle_pct, float dt)
 // AP_MotorsUGV.cpp ~456-457
+```
 
-### 3.1 Nonlinear speed→throttle feed-forward (`ATC_SPD_EXPO`)
+### 3.1 Nonlinear speed→throttle feed-forward (`ATC_SPD_EXPO`)  [header-2](#header-2)
+
 
 ```cpp
 if (is_positive(cruise_speed) && is_positive(cruise_throttle)) {
@@ -138,13 +140,16 @@ See §4.4 for why the collapsed direction-agnostic limit is correct.
 
 `get_steering_out_rate` now constrains `P+D+I+FF` to ±1 before returning:
 
+```cpp
 float output = _steer_rate_pid.update_all(_desired_turn_rate, AP::ahrs().get_yaw_rate_earth(), dt, (motor_limit_left || motor_limit_right));
 output += _steer_rate_pid.get_ff();
 // constrain and return final output
 return constrain_float(output, -1.0f, 1.0f);
 // AR_AttitudeControl.cpp:719-722
+```
 
 All Rover callers multiply by 4500 and treat the result as normalized ±1. Upstream stayed within range only because PID gains kept the sum below ~7.3; this fork's tuning routinely produces −14…−19, which previously exposed the downstream `(int16_t)` wrap documented in §4.6 (also now fixed). The constrain above eliminates that overflow path at the source.
+
 ```
 
 Safe to apply: turn-rate overshoot shaping happens on the *input* (`_steer_decel_max`/`_steer_accel_max` sqrt-limits `desired_rate` at `AR_AttitudeControl.cpp:645-651`), no Rover caller relies on |output|>1, and ArduPlane uses a different class (`AP_SteerController`), so the change is Rover-only.
@@ -274,6 +279,8 @@ New members: `_steer_floor_active`, `_steering_heading_active_ms`, `_drift_risin
 
 **Root cause:** `Mode::set_steering` (`mode.cpp:827`) casts the demand through `int16_t` inside the stick-mixing branch:
 
+**Fix (committed):**
+
 ```cpp
 void Mode::set_steering(float steering_value)
 {
@@ -287,22 +294,8 @@ void Mode::set_steering(float steering_value)
 }
 ```
 
-A saturated demand of −18.77×4500 = **−84465** wraps mod 65536 to **−18929** — observed SteerOut −18840 (delta = unlogged D-term). Verified on 6/6 sampled points; wrapped output sits almost exactly on the −65536 boundary, so ±0.3-unit PID jitter sweeps the servo output through zero → average deflection ≈ 0 → self-locking failure. Active because `ModeLoiter::is_autopilot_mode() = true` (`mode.h`) → `allows_stick_mixing()` is true whenever `STICK_MIXING > 0`.
-
-**Fix (committed):**
-
-void Mode::set_steering(float steering_value)
-{
-    if (allows_stick_mixing() && g2.stick_mixing > 0) {
-        steering_value = channel_steer->stick_mixing((int16_t)constrain_float(steering_value, -4500.0f, 4500.0f));
-    }
-    g2.motors.set_nav_context(!has_manual_input());
-    g2.motors.set_pid_steering(true);
-    g2.motors.set_yaw_rate_max_rads(radians(g2.attitude_control.get_steer_rate_max_degs()));
-    g2.motors.set_steering(steering_value);
-}
-
 Plus the defense-in-depth clamp in §3.3 (now also fixed). Affected **every** autopilot mode (`is_autopilot_mode()=true`) whenever `STICK_MIXING>0` and the heading PID saturated — not just Loiter. §5.3's `get_steering()/4500` normalization and §2.1's `steering_norm` blend now both reliably receive ±4500.
+
 
 ## 5. `Rover/mode_loiter.cpp`
 
