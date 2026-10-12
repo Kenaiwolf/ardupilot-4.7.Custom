@@ -232,7 +232,7 @@ private:
     // output to regular steering and throttle channels
     void output_regular(bool armed, float ground_speed, float steering, float throttle, float dt);
 
-    // unified vectored-thrust allocator (VEC_ALLOC=1): maps desired surge force
+    // unified vectored-thrust allocator (VEC_FOSSEN=1): maps desired surge force
     // fx_req and yaw moment n_req (both normalised -1..1) to steering centidegrees
     // and throttle percent; nav_mode enables the braking-only autonomous reverse policy
     void vectored_allocate(float fx_req, float n_req, float ground_speed,

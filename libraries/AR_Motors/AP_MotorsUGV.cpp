@@ -481,7 +481,7 @@ bool AP_MotorsUGV::get_current_estimate_ne(Vector2f &current_ne) const
     return true;
 }
 
-// unified vectored-thrust allocator (VEC_ALLOC=1). continuous allocation:
+// unified vectored-thrust allocator (VEC_FOSSEN=1). continuous allocation:
 // the (fx_req, n_req) demand is one thrust vector - its direction selects the
 // thruster angle, its magnitude and the dominant axis select throttle. no
 // per-regime states: atan2 handles 0/45/90 deg continuously, saturation folds
@@ -537,7 +537,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         }
         const float atan_angle_rad = constrain_float(delta, -vector_angle_max_rad, vector_angle_max_rad);
 
-        // ported legacy atan-fix (formerly output_regular()-only, VEC_ALLOC=0
+        // ported legacy atan-fix (formerly output_regular()-only, VEC_FOSSEN=0
         // path): near zero throttle, atan2's angle is dominated by noise on
         // the small steering/throttle ratio (hull roll/pitch, sensor noise).
         // blend toward a direct angle proportional to steering demand only,
