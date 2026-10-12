@@ -103,6 +103,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
                                      bool nav_mode, float &steering_cd, float &throttle_pct, float dt)
 // AP_MotorsUGV.cpp ~456-457
 ```
+# 3. `libraries/APM_Control/AR_AttitudeControl.cpp/.h
 
 ### 3.1 Nonlinear speed→throttle feed-forward (`ATC_SPD_EXPO`)  [header-2](#header-2)
 
@@ -146,10 +147,6 @@ output += _steer_rate_pid.get_ff();
 // constrain and return final output
 return constrain_float(output, -1.0f, 1.0f);
 // AR_AttitudeControl.cpp:719-722
-```
-
-
-```
 
 Safe to apply: turn-rate overshoot shaping happens on the *input* (`_steer_decel_max`/`_steer_accel_max` sqrt-limits `desired_rate` at `AR_AttitudeControl.cpp:645-651`), no Rover caller relies on |output|>1, and ArduPlane uses a different class (`AP_SteerController`), so the change is Rover-only.
 
@@ -464,15 +461,8 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | `MOT_VEC_ANGLEMAX=90` boost spike near 89° | kept — clamping removes turn authority at speed |
 | Follow mode: no estimator feed | Follow→Loiter starts cold; documented |
 | Slew-rate limiting on vectored angle | optional future improvement if water tests show a throttle stumble |
-| Nonlinear thrust effectiveness in rotation | at δ=90° full throttle, first ~10 deg/s overshoot then G-limits clamp at ~45; future allocator should dose N-moment via T·sin(δ), not flat throttle shaping |
 | SFL_PIVOT semantics | meant as full-throttle pivot capability (default ~100%), not scaled off SFL_MAX; rotation limit should come from G-limit + physics only |
 | Yaw rate cap during pivot | at δ=90°, T=100% the turn-rate loop has no lever left — rate is set by hull drag/G only; verify water test shows acceptable peak deg/s |
-| N→T spill allocation | when δ saturates (e.g. ANGLEMAX=90 pivot), residual
-  yaw demand is dropped by limit flags today; allocator should convert it
-  into throttle (N = T·sinδ). Inverse: when yaw rate is already high,
-  allocator should close δ and return cosδ to forward thrust. This is the
-  missing axis of the vectored control — current atan-boost approximates
-  it indirectly via 1/cos(δ) scaling |
 | Reverse-gate definition | stern travel = sustained T<0 with |v|<eps AND |δ|<eps. T<0 opposing v or ω is braking — always legal |
 | `reverse_eff=0.8` hardcoded in `vectored_allocate()` | not exposed as a param; `VEC_BRK_ASYM` (default 1.25) is a separate braking-demand multiplier and does NOT parametrize this constant |
 | `stop_vehicle` bypasses `Mode::set_steering` | **no longer harmless** — `Mode::set_steering` now also sets `set_nav_context`, `set_pid_steering(true)`, `set_yaw_rate_max_rads`, none of which `stop_vehicle()` sets since it calls `g2.motors.set_steering()` directly (`mode.cpp:483`); rotation-brake/floor logic may be mis-gated during a stop. Needs fix: either make `stop_vehicle()` set these three, or route it through `Mode::set_steering()` |
@@ -481,7 +471,6 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 ### Open design questions
 - Authority(v,δ) normalization — PID outputs reinterpreted as acceleration/moment demands; allocator would divide by measured authority(v,δ) curve, one gain set valid across speed range. Applies to both yaw and surge axes; reverse uses separate curve (decel/accel ≈ 0.8). Speed-dependent gain in `vectored_allocate` — not yet implemented, needs one new variable (not a new control loop).
 - Accel/decel ratio for a future translational brake (fx<0) — rotation brake is implemented (`vectored_allocate`'s braking-demand asymmetry block); `VEC_BRK_ASYM` applies identically to both rotation-brake and linear surge braking per the code comment, so this specific item may already be resolved. Needs water-test verification, not new code.
----
 
 ---
 
