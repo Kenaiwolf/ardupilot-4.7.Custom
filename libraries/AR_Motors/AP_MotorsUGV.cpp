@@ -691,8 +691,17 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // this function. w_db=0 well inside the deadband (pure hold, no
         // jitter reaches the servo/throttle), w_db=1 at/above VEC_DEADBAND
         // (identical to current behavior there, zero added lag)
+        // gated by the rotation-brake lock: once _vec_rot_brake_active is
+        // true, the brake block above has already pinned steering_angle_rad
+        // to the locked angle and set its own throttle_norm independently -
+        // the deadband blend must not re-touch either, or it would fade the
+        // brake's reverse throttle/angle toward the frozen hold-state using
+        // a magnitude (vec_mag) that has nothing to do with the brake's own
+        // release condition (yaw-rate-error sign / fx). w_db=1 here is a
+        // pass-through, not a judgment that the demand is large - it simply
+        // defers entirely to the brake lock's own state.
         float w_db = 1.0f;
-        if (is_positive(_vec_deadband)) {
+        if (!_vec_rot_brake_active && is_positive(_vec_deadband)) {
             const float db_ratio = constrain_float(vec_mag / _vec_deadband, 0.0f, 1.0f);
             w_db = sq(sinf(db_ratio * M_PI_2));
         }
