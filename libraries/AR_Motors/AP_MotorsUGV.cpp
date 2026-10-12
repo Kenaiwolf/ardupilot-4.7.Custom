@@ -657,7 +657,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // Manual, which must stay a pure RC passthrough
         const bool rot_brake_trigger = (nav_mode || _pid_steering) &&
             fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
-            (n * yaw_rate_rads) < 0.0f;
+            (n * yaw_rate_rads) < 0.01f;
 
         if (!_vec_rot_brake_active && rot_brake_trigger) {
             _vec_rot_brake_active = true;
