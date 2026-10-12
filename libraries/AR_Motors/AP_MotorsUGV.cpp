@@ -513,7 +513,11 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
     // tick) since _vec_throttle_filt is what this block is computing
     float resid_tc_scaled = _vec_resid_tc;
     if (is_positive(_vec_blend_thr)) {
-        const float tc_scale = 1.0f - constrain_float(fabsf(fx) / _vec_blend_thr, 0.0f, 1.0f);
+        // S-shaped ramp (same sin^2 shape as the pivot blend below), not
+        // linear: flatter near both ends, steeper mid-transition, so the
+        // filter strength doesn't kink at the VEC_BLND_THR boundary
+        const float tc_ratio = constrain_float(fabsf(fx) / _vec_blend_thr, 0.0f, 1.0f);
+        const float tc_scale = sq(cosf(tc_ratio * M_PI_2));    // smooth S-shape: slope=0 at both ends, no kink
         resid_tc_scaled *= tc_scale;
     }
     if (is_positive(resid_tc_scaled)) {
@@ -560,7 +564,10 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         }
         float w_lowthr;
         if (is_positive(_vec_blend_thr)) {
-            w_lowthr = 1.0f - constrain_float(fabsf(_vec_throttle_filt) / _vec_blend_thr, 0.0f, 1.0f);
+            // same sin^2 S-curve as the pivot blend (and the VEC_RESID_TC
+            // scaling above), replacing the previous linear ramp
+            const float lowthr_ratio = constrain_float(fabsf(_vec_throttle_filt) / _vec_blend_thr, 0.0f, 1.0f);
+            w_lowthr = sq(cosf(lowthr_ratio * M_PI_2));    // smooth S-shape, same family as the pivot blend
         } else {
             w_lowthr = 0.0f;
         }
