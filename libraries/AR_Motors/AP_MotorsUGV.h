@@ -326,15 +326,17 @@ private:
 	float   _vec_steering_filt;   // low-pass filtered steering_norm, same time constant as _vec_throttle_filt
     float   _vec_last_steering_angle_rad; // last commanded vectored-thrust steering angle (rad), held during deadband
     float   _vec_last_w;                  // last blend weight (w), held during deadband so throttle boost stays consistent
+    bool    _vec_rot_brake_active;        // true while rotation-brake angle-lock (Option B) is holding steering_angle_rad fixed against atan2/direct-angle recompute and the steering PID
+    float   _vec_rot_brake_angle_rad;     // steering angle (rad) locked in at the instant _vec_rot_brake_active was set true
     AP_Int8 _vec_fossen;                  // VEC_FOSSEN: 0 = stock vectored blend + SFL floor/cosine reduction active, 1 = Fossen unified allocator (floor/cosine reduction auto-disabled)
     AP_Float _sfl_pivot_pct;              // SFL_PIVOT: raised floor throttle while yaw error >= SFL_IFRZ
     AP_Float _vec_brk_pct;                // VEC_BRK: rotation-brake reverse thrust scale (%), 0 disables
     AP_Float _vec_yaw_lin_expo;           // VEC_YAW_EXP: inverse-exponent linearization of yaw-dominant throttle demand, 1.0=off
     AP_Float _vec_brk_asym;               // VEC_BRK_ASYM: braking-demand multiplier (reverse thrust less efficient than forward), 1.0=off
-    AP_Float _vec_cos_flr_deg;            // VEC_COS_FLR: angular margin (deg) from 90 deg mechanical stop where cos(delta) floor engages, 0=legacy hard threshold  
-	AP_Float _vec_bld_strt_deg;           // VEC_BLD_STRT: steering angle (deg) below which throttle is pure geometric decomposition  
-    AP_Float _yaw_crs_rate_dps;           // YAW_CRS_RATE: reference yaw rate (deg/s) for pivot throttle calibration  
-    AP_Float _yaw_crs_thr_pct;            // YAW_CRS_THR: throttle (%) required to sustain YAW_CRS_RATE in pivot mode  
+    AP_Float _vec_cos_flr_deg;            // VEC_COS_FLR: angular margin (deg) from 90 deg mechanical stop where cos(delta) floor engages, 0=legacy hard threshold
+	AP_Float _vec_bld_strt_deg;           // VEC_BLD_STRT: steering angle (deg) below which throttle is pure geometric decomposition
+    AP_Float _yaw_crs_rate_dps;           // YAW_CRS_RATE: reference yaw rate (deg/s) for pivot throttle calibration
+    AP_Float _yaw_crs_thr_pct;            // YAW_CRS_THR: throttle (%) required to sustain YAW_CRS_RATE in pivot mode
     bool    _nav_context;                 // true if last steering request came from an autopilot mode
 	bool    _pid_steering;  // true when steering demand came through Mode::set_steering (closed-loop); manual bypass never sets it
 	float   _yaw_rate_max_rads = radians(24.0f);  // physical max turn rate; default = measured pivot plateau

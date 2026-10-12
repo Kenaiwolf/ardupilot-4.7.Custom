@@ -341,7 +341,7 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("VEC_BLD_STRT", 45, AP_MotorsUGV, _vec_bld_strt_deg, 70.0f),
 
-	    // @Param: YAW_CRS_RATE
+	// @Param: YAW_CRS_RATE
     // @DisplayName: Yaw pivot cruise rate reference
     // @Description: Reference yaw rate (deg/s) used to calibrate pivot-mode throttle in the unified allocator, analogous to SPEED_CRUISE for forward motion. Paired with YAW_CRS_THR: at this rate, pivot throttle = YAW_CRS_THR before VEC_YAW_EXP shaping. Should be a rate comfortably inside normal PID authority, not ATC_STR_RAT_MAX
     // @Units: deg/s
@@ -631,22 +631,49 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             throttle_norm *= brk_asym;
         }
 
-        // rotation brake: servo at full deflection AND PID demands rotation
-        // opposite to the measured yaw rate -> hull carries angular momentum
-        // that closing the angle cannot remove. hold the angle, command T<0
-        // (counter-torque), scaled by |omega| relative to the measured pivot
-        // rate (~16 deg/s steady-state) and inflated by VEC_BRK_ASYM to
-        // compensate reverse thrust being less efficient than forward.
+        // rotation brake (Option B, angle-locked): flipping the angle to the
+        // opposite side while the hull is still overshooting the commanded
+        // rotation is the actual failure mode this guards against - a ~15kg
+        // thruster traversing ~1.5s under full load, at the exact moment a
+        // fast corrective reaction is needed, is a net-negative response.
+        // instead: the instant the measured yaw rate opposes the commanded
+        // direction (n) while at/near full deflection, LOCK steering_angle_rad
+        // at its current value - immune to the atan2/direct-angle blend above
+        // and to whatever the steering PID asks for - and brake with reverse
+        // thrust proportional to |n| alone. n (not an approximated rad/s
+        // turn rate) is used deliberately: n is a ratio quantity with no
+        // reliable conversion to a physical rate without pulling in
+        // assumptions (ATC_STR_RAT_MAX, YAW_CRS_RATE/YAW_CRS_THR) that were
+        // calibrated for acceleration, not braking, and n alone is already
+        // sufficient as the proportional weight. the lock releases only once
+        // the measured yaw rate's sign agrees with n again (error crossed
+        // back through zero) - normal steering then resumes from the
+        // then-current n, with no intermediate state to unwind. brk_asym
+        // always applies here: with the angle locked, this thrust can never
+        // land on the "accidentally forward" side the way an unlocked flip
+        // could - it is always genuine counter-rotation reverse thrust.
         // MOT_VEC_BRK scales the magnitude (0 = brake off). active in
-        // autopilot modes (nav_mode) and in Acro (pid_steering), where
-        // throttle comes from the speed PID and the operator has no brake
-        // lever. excluded only in Manual, which must stay a pure RC passthrough
-        if ((nav_mode || _pid_steering) &&
+        // autopilot modes (nav_mode) and in Acro (pid_steering); excluded in
+        // Manual, which must stay a pure RC passthrough
+        const bool rot_brake_trigger = (nav_mode || _pid_steering) &&
             fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
-            (_vec_steering_filt * yaw_rate_rads) < 0.0f) {
+            (n * yaw_rate_rads) < 0.0f;
+
+        if (!_vec_rot_brake_active && rot_brake_trigger) {
+            _vec_rot_brake_active = true;
+            _vec_rot_brake_angle_rad = steering_angle_rad;
+        } else if (_vec_rot_brake_active && (n * yaw_rate_rads) >= 0.0f) {
+            // measured rotation agrees with commanded direction again:
+            // error has crossed zero (or commanded direction itself
+            // reversed to match) - release, resume normal steering
+            _vec_rot_brake_active = false;
+        }
+
+        if (_vec_rot_brake_active) {
+            steering_angle_rad = _vec_rot_brake_angle_rad;
             const float brake_scale = _vec_brk_pct * 0.01f;
-            const float brake_frac = constrain_float(fabsf(yaw_rate_rads) / yaw_rate_max, 0.2f, 1.0f) * brake_scale;
-            throttle_norm = copysignf(fmaxf(fabsf(throttle_norm), brake_frac * brk_asym), _vec_steering_filt);
+            const float brake_frac = fabsf(n) * brake_scale;
+            throttle_norm = copysignf(brake_frac * brk_asym, n);
         }
 
         if (fabsf(steering_angle_rad) >= vector_angle_max_rad) {
