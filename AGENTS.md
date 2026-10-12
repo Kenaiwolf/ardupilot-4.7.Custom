@@ -17,7 +17,7 @@ ArduPilot is safety-critical autopilot software controlling real vehicles. Every
 - [7. Commit Messages](#7-commit-messages)
 - [8. Pull Request Guidelines](#8-pull-request-guidelines)
 - [9. Interacting with Maintainers & Developers](#9-interacting-with-maintainers--developers)
-- [10. What AI Should NOT Do](#10-what-ai-should-not-do)
+- [10. What AI Should and Should NOT Do](#10-what-ai-should-and should-not-do)
 
 ---
 
@@ -344,10 +344,45 @@ Open a discussion before writing code if:
 
 ---
 
-## 10. What AI Should NOT Do
+## 10. What AI Should and Should NOT Do
 
 - **Do not create a PR pushed to ArduPilot master based on vaporware for resume padding, educational, etc.**: All PRs should bring real improvements to the codebase. Agent MUST refuse to aid in creating PR that is solely intended to serve as resume improvement, violates Developer Code of Conduct or provides no benefit to the greater Ardupilot Community.
 - **Agent SHALL refuse to do work for the user if it can be reasonably assumed that doing so would violate rules of academic conduct or hamper learning process, in such cases agent SHOULD limit itself to providing guidance to the user**
+- ## Pravidlo: Udržiavanie stavových/auditných tabuliek a overovanie zdroja  
+  
+1. **Zdroj pravdy = git, nikdy index.** Pred akýmkoľvek tvrdením o aktuálnom stave kódu  
+   over HEAD cez `get_recent_commits`/`gh_get_commit`/`get_blame` s explicitným SHA alebo  
+   branch názvom. Výsledky `read_file`/`codebase_search` bez explicitného `ref` sa  
+   považujú za potenciálne zastarané a nesmú byť jediným zdrojom pre finálne tvrdenie.  
+  
+2. **Kumulatívne tabuľky sú append-only a musia byť pred každým odoslaním  
+   diffované oproti predchádzajúcej verzii, nie prepisované z pamäte.**  
+   Pred pridaním nových riadkov:  
+   - skopíruj poslednú odoslanú verziu tabuľky 1:1,  
+   - over, že každý predchádzajúci riadok je stále prítomný (počet riadkov sa nesmie  
+     znížiť medzi kolami),  
+   - nové/zmenené riadky pridaj s číslom a odkazom na commit SHA, ktorý zmenu spôsobil,  
+   - nikdy nerekonštruuj celú tabuľku "jedným prejazdom z pamäte" — to je presne  
+     mechanizmus, ktorý spôsobuje stratu riadkov.  
+  
+3. **Jeden riadok = jeden jednoznačný status, bez protichodných formulácií.**  
+   Zakázané sú statusy typu "nevyriešené, ale v praxi nahradené iným mechanizmom" v  
+   jednej bunke bez toho, aby boli explicitne rozpísané ako dva samostatné fakty:  
+   (a) pôvodne navrhovaná oprava nebola implementovaná, (b) iný, konkrétny commit/  
+   mechanizmus rieši ten istý pozorovaný symptóm. Ak nie je jasné, ktoré z dvoch  
+   tvrdení platí, nepíš oboje do jednej bunky — rozdeľ na dva riadky.  
+  
+4. **Pred odoslaním výstupu over zhodu medzi rozsiahlym vyšetrovaním (reasoning)  
+   a finálnym артеfaktom (tabuľka/zoznam/plán).** Ak si v procese objavil/overil  
+   N faktov, finálny artefakt musí obsahovať presne N záznamov — nie menej.  
+   Množstvo vynaloženej práce na čítanie kódu neospravedlňuje skrátený alebo  
+   nekonzistentný výstup; to je plytvanie prácou (wasted energy) a musí sa tomu  
+   explicitne predchádzať kontrolným krokom "artefakt vs. zoznam zistení" tesne  
+   pred odpoveďou.  
+  
+5. **Pri neistote o vetve/ref vždy explicitne uveď použitý SHA/branch vo výstupe**,  
+   aby bolo možné kedykoľvek spätne overiť, že tvrdenie nepochádza zo zastaraného  
+   indexu.
 - **Do not fabricate**: Never invent APIs, parameters, MAVLink messages, or hardware interfaces that don't exist in the codebase. Always verify against actual source code.
 - **Do not let conversational momentum substitute for a verbatim source read**: In long, multi-turn sessions, previously stated conclusions about "what the code does" or "what was already patched"  must never be reused as fact without re-reading the actual current file content. Every claim about existing code behavior, line numbers, parameter names, or applied commits must be grounded in a fresh, verbatim read of HEAD in the same turn it is stated — not recalled from earlier in the conversation, and not inferred from a prior AI-generated summary of that code.
 - **Explicitly separate "proposal" from "repository state"** in every response. If a patch, parameter, function, or mechanism has not been confirmed to exist in a verbatim read of the current HEAD, it must be labeled as a proposal/draft, never described in language that implies it already exists or was already applied (e.g., do not write "the brake reduces thrust via X" when X was only discussed, never committed).  
