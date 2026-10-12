@@ -347,7 +347,7 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @Units: deg/s
     // @Range: 1.0 60.0
     // @User: Advanced
-    AP_GROUPINFO("YAW_CRS_RATE", 46, AP_MotorsUGV, _yaw_crs_rate_dps, 10.0f),
+    AP_GROUPINFO("YAW_CRS_RATE", 46, AP_MotorsUGV, _yaw_crs_rate_dps, 16.0f),
 
     // @Param: YAW_CRS_THR
     // @DisplayName: Yaw pivot cruise throttle reference
@@ -355,7 +355,7 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @Units: %
     // @Range: 1.0 100.0
     // @User: Advanced
-    AP_GROUPINFO("YAW_CRS_THR", 47, AP_MotorsUGV, _yaw_crs_thr_pct, 25.0f),
+    AP_GROUPINFO("YAW_CRS_THR", 47, AP_MotorsUGV, _yaw_crs_thr_pct, 49.0f),
 
 
     AP_GROUPEND
@@ -492,9 +492,14 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
     // measured yaw rate (rad/s, earth frame = body yaw rate on a boat)
     const float yaw_rate_rads = AP::ahrs().get_yaw_rate_earth();
 
-	// physical turn-rate ceiling: fed from ATC_STR_RAT_MAX each cycle
-    // (falls back to the 24 deg/s default if the param is zero/disabled)
-    const float yaw_rate_max = _yaw_rate_max_rads;
+	// physical turn-rate ceiling for rotation-brake normalization: reuse  
+    // YAW_CRS_RATE, the same calibrated pivot-rate reference the pivot  
+    // throttle blend uses below, so brake authority and pivot throttle key  
+    // off one measured number instead of two independently-set ones.  
+    // falls back to _yaw_rate_max_rads (24 deg/s default) if YAW_CRS_RATE  
+    // is unset/zero, so behavior is unchanged until you set it.  
+    const float yaw_rate_max = is_positive(_yaw_crs_rate_dps) ?  
+        radians(_yaw_crs_rate_dps) : _yaw_rate_max_rads;
 
     const float fx = constrain_float(fx_req, -1.0f, 1.0f);
     const float n  = constrain_float(n_req, -1.0f, 1.0f);
