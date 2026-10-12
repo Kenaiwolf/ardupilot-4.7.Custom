@@ -305,7 +305,7 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
 
     // @Param: VEC_BRK
     // @DisplayName: Vectored rotation brake scale
-    // @Description: Scaling of the rotation-brake reverse thrust (%) in the unified allocator. 100 = nominal (|yaw rate|/16deg/s derated by reverse efficiency 0.8); 0 disables the brake; >100 allows stronger-than-nominal counter-thrust. Only active when the servo is at full deflection and the PID demands opposite rotation
+    // @Description: Scaling of the rotation-brake reverse thrust (%) in the unified allocator. 100 = nominal (brake magnitude = |n| x this scale, further multiplied by VEC_BRK_ASYM); 0 disables the brake; >100 allows stronger-than-nominal counter-thrust. Only active when the servo is at full deflection and the PID demands opposite rotation
     // @Units: %
     // @Range: 0 200
     // @User: Advanced
