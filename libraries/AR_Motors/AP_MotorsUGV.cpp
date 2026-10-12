@@ -152,7 +152,7 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @Description: Filtered throttle below which the vectored angle blends from direct steering-proportional angle into full atan(); 0 = legacy atan() always
     // @Range: 0.0 1.0
     // @User: Advanced
-    AP_GROUPINFO("VEC_BLND_THR", 18, AP_MotorsUGV, _vec_blend_thr, 0.3f),
+    AP_GROUPINFO("VEC_BLND_THR", 18, AP_MotorsUGV, _vec_blend_thr, 0.15f),
 
     // @Param: VEC_RESID_TC
     // @DisplayName: Vectored thrust throttle filter time constant
@@ -492,13 +492,13 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
     // measured yaw rate (rad/s, earth frame = body yaw rate on a boat)
     const float yaw_rate_rads = AP::ahrs().get_yaw_rate_earth();
 
-	// physical turn-rate ceiling for rotation-brake normalization: reuse  
-    // YAW_CRS_RATE, the same calibrated pivot-rate reference the pivot  
-    // throttle blend uses below, so brake authority and pivot throttle key  
-    // off one measured number instead of two independently-set ones.  
-    // falls back to _yaw_rate_max_rads (24 deg/s default) if YAW_CRS_RATE  
-    // is unset/zero, so behavior is unchanged until you set it.  
-    const float yaw_rate_max = is_positive(_yaw_crs_rate_dps) ?  
+	// physical turn-rate ceiling for rotation-brake normalization: reuse
+    // YAW_CRS_RATE, the same calibrated pivot-rate reference the pivot
+    // throttle blend uses below, so brake authority and pivot throttle key
+    // off one measured number instead of two independently-set ones.
+    // falls back to _yaw_rate_max_rads (24 deg/s default) if YAW_CRS_RATE
+    // is unset/zero, so behavior is unchanged until you set it.
+    const float yaw_rate_max = is_positive(_yaw_crs_rate_dps) ?
         radians(_yaw_crs_rate_dps) : _yaw_rate_max_rads;
 
     const float fx = constrain_float(fx_req, -1.0f, 1.0f);
@@ -523,7 +523,8 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
 
     if (vec_mag < _vec_deadband) {
         // negligible demand on both axes: freeze the angle to suppress jitter
-        // and output zero thrust
+        // and output zero thrust. hard floor only, well below VEC_BLND_THR -
+        // the blend below is now the primary anti-jitter mechanism
         steering_angle_rad = _vec_last_steering_angle_rad;
         throttle_norm = 0.0f;
     } else {
@@ -536,7 +537,25 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         if (fabsf(delta) > M_PI_2) {
             delta = is_positive(delta) ? (delta - M_PI) : (delta + M_PI);
         }
-        steering_angle_rad = constrain_float(delta, -vector_angle_max_rad, vector_angle_max_rad);
+        const float atan_angle_rad = constrain_float(delta, -vector_angle_max_rad, vector_angle_max_rad);
+
+        // ported legacy atan-fix (formerly output_regular()-only, VEC_ALLOC=0
+        // path): near zero throttle, atan2's angle is dominated by noise on
+        // the small steering/throttle ratio (hull roll/pitch, sensor noise).
+        // blend toward a direct angle proportional to steering demand only,
+        // same VEC_BLND_THR threshold/mechanism as the legacy blend, now
+        // applied inside the Fossen allocator instead of being unavailable
+        float direct_angle_rad = constrain_float(_vec_steering_filt, -1.0f, 1.0f) * vector_angle_max_rad;
+        if (is_negative(_vec_throttle_filt)) {
+            direct_angle_rad = -direct_angle_rad;
+        }
+        float w_lowthr;
+        if (is_positive(_vec_blend_thr)) {
+            w_lowthr = 1.0f - constrain_float(fabsf(_vec_throttle_filt) / _vec_blend_thr, 0.0f, 1.0f);
+        } else {
+            w_lowthr = 0.0f;
+        }
+        steering_angle_rad = w_lowthr * direct_angle_rad + (1.0f - w_lowthr) * atan_angle_rad;
 
         // magnitude: fx/cos(delta) generalizes vec_mag to the case where the
         // angle clamp above actually engaged (VEC_ANGLEMAX<90): if delta was
