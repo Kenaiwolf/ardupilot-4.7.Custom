@@ -492,15 +492,6 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
     // measured yaw rate (rad/s, earth frame = body yaw rate on a boat)
     const float yaw_rate_rads = AP::ahrs().get_yaw_rate_earth();
 
-	// physical turn-rate ceiling for rotation-brake normalization: reuse
-    // YAW_CRS_RATE, the same calibrated pivot-rate reference the pivot
-    // throttle blend uses below, so brake authority and pivot throttle key
-    // off one measured number instead of two independently-set ones.
-    // falls back to _yaw_rate_max_rads (24 deg/s default) if YAW_CRS_RATE
-    // is unset/zero, so behavior is unchanged until you set it.
-    const float yaw_rate_max = is_positive(_yaw_crs_rate_dps) ?
-        radians(_yaw_crs_rate_dps) : _yaw_rate_max_rads;
-
     const float fx = constrain_float(fx_req, -1.0f, 1.0f);
     const float n  = constrain_float(n_req, -1.0f, 1.0f);
     const float vector_angle_max_rad = radians(constrain_float(_vector_angle_max, 0.0f, 90.0f));
@@ -596,7 +587,13 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         const float pivot_expo = MAX(_vec_yaw_lin_expo, 1.0f);
         float t_pivot;
         if (is_positive(_yaw_crs_rate_dps) && is_positive(_yaw_crs_thr_pct)) {
-            const float rate_ratio = fabsf(n) / _yaw_crs_rate_dps;
+            // rate_ratio: n is already a normalized [-1,1] fraction of full
+            // yaw demand (constrained above), so n=1 IS the YAW_CRS_RATE
+            // calibration point by definition - no unit conversion needed.
+            // (previous version incorrectly divided n by _yaw_crs_rate_dps,
+            // a deg/s value, collapsing rate_ratio toward ~0 even at n=1
+            // and effectively defeating the YAW_CRS_THR ceiling)
+            const float rate_ratio = fabsf(n);
             t_pivot = copysignf((_yaw_crs_thr_pct * 0.01f) * powf(rate_ratio, pivot_expo), n);
         } else {
             t_pivot = vec_mag;
