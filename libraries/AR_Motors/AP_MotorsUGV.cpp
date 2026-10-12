@@ -506,9 +506,18 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
     const float vector_angle_max_rad = radians(constrain_float(_vector_angle_max, 0.0f, 90.0f));
 
     // low-pass filter the demand vector to suppress atan2 noise amplification
-    // near zero throttle (same purpose as the legacy filter)
-    if (is_positive(_vec_resid_tc)) {
-        const float alpha = constrain_float(dt / (_vec_resid_tc + dt), 0.0f, 1.0f);
+    // near zero throttle (same purpose as the legacy filter). scoped to the
+    // same low-throttle band as VEC_BLND_THR/the atan-fix blend below: full
+    // VEC_RESID_TC near zero throttle, fading to zero (no filtering, no
+    // phase lag) at/above VEC_BLND_THR. uses raw fx (not yet filtered this
+    // tick) since _vec_throttle_filt is what this block is computing
+    float resid_tc_scaled = _vec_resid_tc;
+    if (is_positive(_vec_blend_thr)) {
+        const float tc_scale = 1.0f - constrain_float(fabsf(fx) / _vec_blend_thr, 0.0f, 1.0f);
+        resid_tc_scaled *= tc_scale;
+    }
+    if (is_positive(resid_tc_scaled)) {
+        const float alpha = constrain_float(dt / (resid_tc_scaled + dt), 0.0f, 1.0f);
         _vec_throttle_filt += (fx - _vec_throttle_filt) * alpha;
         _vec_steering_filt += (n - _vec_steering_filt) * alpha;
     } else {
