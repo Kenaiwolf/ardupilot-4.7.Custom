@@ -103,9 +103,9 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
                                      bool nav_mode, float &steering_cd, float &throttle_pct, float dt)
 // AP_MotorsUGV.cpp ~456-457
 ```
-# 3. `libraries/APM_Control/AR_AttitudeControl.cpp/.h
+## 3. `libraries/APM_Control/AR_AttitudeControl.cpp/.h`
 
-### 3.1 Nonlinear speed→throttle feed-forward (`ATC_SPD_EXPO`)  [header-2](#header-2)
+### 3.1 Nonlinear speed→throttle feed-forward (`ATC_SPD_EXPO`)
 
 
 ```cpp
@@ -147,7 +147,7 @@ output += _steer_rate_pid.get_ff();
 // constrain and return final output
 return constrain_float(output, -1.0f, 1.0f);
 // AR_AttitudeControl.cpp:719-722
-
+```
 Safe to apply: turn-rate overshoot shaping happens on the *input* (`_steer_decel_max`/`_steer_accel_max` sqrt-limits `desired_rate` at `AR_AttitudeControl.cpp:645-651`), no Rover caller relies on |output|>1, and ArduPlane uses a different class (`AP_SteerController`), so the change is Rover-only.
 
 ---
@@ -389,6 +389,7 @@ if (have_attitude_target) {
     // corrected_heading_cd here would subtract our own correction out of the
     // measured drift, systematically under-estimating it
     update_drift_estimator(_desired_yaw_cd, _desired_speed);
+	```
 
     // apply drift compensation to a local copy of the heading only -
     // _desired_yaw_cd must stay clean (persistent commanded target, re-read
