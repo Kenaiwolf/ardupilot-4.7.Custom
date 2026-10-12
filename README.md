@@ -94,9 +94,9 @@ Then a shared staleness cutoff `DRIFT_MAXAGE` (default 1800 s, 0 = never trust) 
 
 All new params live in `AP_MotorsUGV` under the `MOT_`/`LOIT_`/`DRIFT_`/`SFL_` prefixes — see §9 table.
 
-### 2.5 Unified vectored-thrust allocator (`VEC_ALLOC`)
+ified vectored-thrust al`2.5 Unified vectored-thrust allocator, Fossen-style (VEC_FOSSEN)`
 
-`vectored_allocate()` is an alternative output path (gated by `VEC_ALLOC=1`) that replaces the §2.1 blend with a single continuous allocation: the `(fx_req, n_req)` demand (normalized surge force / yaw moment, both ±1) is treated as one thrust vector whose direction picks the thruster angle and whose magnitude/dominant axis picks throttle, via `atan2` — no separate 0°/45°/90° regimes, so saturation folds unmet demand into the other axis instead of dropping it.
+Renamed from VEC_ALLOC on 2026-10-11 (same param index 39) when the allocator's underlying math was reworked toward a Fossen-style formulation; the rename may not be purely cosmetic, re-verify behavior against this section's description rather than assuming VEC_ALLOC=1 behavior carried over unchanged. Requires MOT_VEC_ANGLEMAX=90. vectored_allocate() is an alternative output path (gated by VEC_FOSSEN=1) that replaces the §2.1 blend with a single continuous allocation: the (fx_req, n_req) demand (normalized surge force / yaw moment, both ±1) is treated as one thrust vector whose direction picks the thruster angle and whose magnitude/dominant axis picks throttle, via atan2 — no separate 0°/45°/90° regimes, so saturation folds unmet demand into the other axis instead of dropping it. Enabling VEC_FOSSEN=1 automatically disables the legacy SFL steering-thrust floor and cosine throttle reduction (§2.1/§3) to avoid double throttle compensation — this interaction is not optional and should be stated explicitly, not left implicit.locator 
 
 ```cpp
 void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_speed,
@@ -438,11 +438,15 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | `LOIT_COAST_THR` | AP_MotorsUGV | 1 % | coast gate (method 1) |
 | `LOIT_I_EQERR`/`I_MIN`/`I_ALPHA`/`I_DISAG` | AP_MotorsUGV | 0.10/0.02/0.10/0.5 | method-2 window, noise floor, EMA, disagreement |
 | `LOIT_ROT_ANG`/`LOIT_ROT_RATE` | AP_MotorsUGV | 15°/20 °/s | rotation gate (method 1); 0 = off |
-| `VEC_ALLOC` | AP_MotorsUGV | 0 | 0=stock blended atan/direct mapping (§2.1); 1=unified `vectored_allocate()` mapping (surge force, yaw moment) → thruster angle+throttle, with braking-only reverse enforced for autonomous modes |
+| `VEC_FOSSEN` | AP_MotorsUGV | 0 | renamed from `VEC_ALLOC` 2026-10-11 (same index 39); 0=stock blend + legacy SFL floor/cosine reduction stay active; 1=Fossen-style unified allocator (`vectored_allocate()`), mutually exclusive with SFL floor/cosine reduction (auto-disabled to avoid double compensation). Requires `MOT_VEC_ANGLEMAX=90` |
 | `SFL_PIVOT` | AP_MotorsUGV | 0.0 % | minimum floor throttle while heading error exceeds `SFL_IFRZ`; 0 disables. Semantic note: intended as full-throttle pivot capability, not scaled off `SFL_MAX` — see §11 open design question |
-| `VEC_BRK` | AP_MotorsUGV | 100 % | rotation-brake reverse thrust scale; 100 = nominal (|yaw rate|/16 deg/s derated by `reverse_eff=0.8`), 0 disables the brake |
+| `VEC_BRK` | AP_MotorsUGV | 100 % | rotation-brake reverse thrust scale; 100 = nominal (|yaw rate|/16 deg/s derated by reverse efficiency 0.8), 0 disables the brake; only active when servo at full deflection and PID demands opposite rotation |
 | `VEC_YAW_EXP` | AP_MotorsUGV | 1.67 | inverse exponent linearizing yaw-dominant throttle demand (`TurnRate_frac = ThrOut_frac^n` fit from logs); 1.0 = no linearization |
-| `VEC_BRK_ASYM` | AP_MotorsUGV | 1.25 | multiplier on counter-thrust (braking) demand, rotation-brake and linear surge braking alike, compensating reverse thrust being less efficient than forward; 1.0 = symmetric/off |
+| `VEC_BRK_ASYM` | AP_MotorsUGV | 1.24 | multiplier on counter-thrust (braking) demand, rotation-brake and linear surge braking alike, compensating reverse thrust being less efficient than forward; 1.0 = symmetric/off |
+| `VEC_COS_FLR` | AP_MotorsUGV | 10.0 deg | angular margin from mechanical 90° stop where the cos(δ) magnitude floor engages, preventing blow-up near the singularity; 0 = legacy 1e-3 hard threshold |
+| `VEC_BLD_STRT` | AP_MotorsUGV | 70.0 deg | steering angle below which throttle is pure surge/yaw geometric decomposition (`VEC_YAW_EXP` has zero effect) |
+| `YAW_CRS_RATE` | AP_MotorsUGV | 16.0 deg/s | reference pivot yaw rate calibrating pivot-mode throttle, analogous to `SPEED_CRUISE`; paired with `YAW_CRS_THR` |
+| `YAW_CRS_THR` | AP_MotorsUGV | 49.0 % | throttle required to sustain `YAW_CRS_RATE` in pivot mode, analogous to `THR_CRUISE`; shaped by `VEC_YAW_EXP` for other turn rates |
 
 ---
 
