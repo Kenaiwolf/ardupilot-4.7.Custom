@@ -148,7 +148,6 @@ return constrain_float(output, -1.0f, 1.0f);
 // AR_AttitudeControl.cpp:719-722
 ```
 
-All Rover callers multiply by 4500 and treat the result as normalized ±1. Upstream stayed within range only because PID gains kept the sum below ~7.3; this fork's tuning routinely produces −14…−19, which previously exposed the downstream `(int16_t)` wrap documented in §4.6 (also now fixed). The constrain above eliminates that overflow path at the source.
 
 ```
 
