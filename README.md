@@ -1,10 +1,10 @@
 # Fork Documentation: Kenaiwolf/ardupilot-4.7.Custom — Rover Vectored-Thrust Drift Compensation  
   
-**Fork base:** upstream ArduPilot **Rover 4.7.1** (release line ending at `dbe79216`, Sep 2026). Fork work begins at `baab9fab` ("nutne minimum V1") and culminates at `9f09d8bf` (this document).  
+**Fork base:** upstream ArduPilot **Rover 4.7.1** (release line ending at `dbe79216`, Sep 2026). Fork work begins at `baab9fab` ("nutne minimum V1"); fork work is ongoing — see `git log` for the latest commit.  
   
 **Target vehicle:** 250 kg vectored-thrust boat (single steerable thruster on bow MOT_VEC_ANGLEMAX=90, GPS + compass, no wheel encoders,no proximity or optical sensors).
   
-**Modified files:** `Rover/GCS_MAVLink_Rover.cpp`, `Rover/mode.cpp`, `Rover/mode.h`, `Rover/mode_guided.cpp`, `Rover/mode_loiter.cpp`, `libraries/APM_Control/AR_AttitudeControl.cpp/.h`, `libraries/AR_Motors/AP_MotorsUGV.cpp/.h`, baro driver replace `AP_BARO_LPS2XH`→`AP_BARO_MS5611` (`0320e405`), param files `Tools/Frame_params/Deset-mapping-boat.param` + `Tools/autotest/default_params/rover-vectored.parm`, new file `extra_hwdef.dat` (repo root), `README.md` (this file).  
+**Modified files:** `Rover/GCS_MAVLink_Rover.cpp`, `Rover/mode.cpp`, `Rover/mode.h`, `Rover/mode_guided.cpp`, `Rover/mode_loiter.cpp`, `libraries/APM_Control/AR_AttitudeControl.cpp/.h`, `libraries/AR_Motors/AP_MotorsUGV.cpp/.h`, baro driver replace `AP_BARO_LPS2XH`→`AP_BARO_MS5611` (`0320e405`), param files `Tools/Frame_params/Deset-mapping-boat.param` + `Tools/autotest/default_params/rover-vectored.parm`, new file `extra_hwdef.dat` (repo root), new file `troubleshooting_tuning_ guide.txt` (repo root, tuning/debugging reference for the vectored-thrust allocator), `README.md` (this file).  
   
 ---  
   
@@ -129,23 +129,17 @@ throttle_out += _throttle_speed_pid.get_ff();
   
 See §4.4 for why the collapsed direction-agnostic limit is correct.  
   
-### 3.3 Normalized steering output contract (`get_steering_out_rate`) — FIX PENDING  
+### 3.3 Normalized steering output contract (`get_steering_out_rate`) — FIXED  
   
-`get_steering_out_rate` currently returns `P+D+I+FF` **unconstrained** (upstream behavior):  
+`get_steering_out_rate` now constrains `P+D+I+FF` to ±1 before returning:  
   
-```cpp  
 float output = _steer_rate_pid.update_all(_desired_turn_rate, AP::ahrs().get_yaw_rate_earth(), dt, (motor_limit_left || motor_limit_right));  
 output += _steer_rate_pid.get_ff();  
-return output;  
-// AR_AttitudeControl.cpp:719-722  
-```  
-  
-All Rover callers multiply by 4500 and treat the result as normalized ±1. Upstream stays within range only because PID gains keep the sum below ~7.3; this fork's tuning routinely produces −14…−19, which exposed the downstream `(int16_t)` wrap documented in §4.6.  
-  
-**Fix (prepared, pending commit):**  
-  
-```cpp  
+// constrain and return final output  
 return constrain_float(output, -1.0f, 1.0f);  
+// AR_AttitudeControl.cpp:719-722  
+  
+All Rover callers multiply by 4500 and treat the result as normalized ±1. Upstream stayed within range only because PID gains kept the sum below ~7.3; this fork's tuning routinely produces −14…−19, which previously exposed the downstream `(int16_t)` wrap documented in §4.6 (also now fixed). The constrain above eliminates that overflow path at the source.   
 ```  
   
 Safe to apply: turn-rate overshoot shaping happens on the *input* (`_steer_decel_max`/`_steer_accel_max` sqrt-limits `desired_rate` at `AR_AttitudeControl.cpp:645-651`), no Rover caller relies on |output|>1, and ArduPlane uses a different class (`AP_SteerController`), so the change is Rover-only.  
@@ -269,7 +263,7 @@ The world-frame memory of current lives in the drift estimator (NE coordinates),
   
 New members: `_steer_floor_active`, `_steering_heading_active_ms`, `_drift_rising_count`, `_drift_zero_count`, `_drift_i_filt`/`_drift_i_filt_valid`, `_inside_loiter_circle`, `_throttle_nav_pct`; constants `DRIFT_SEED_MIN_AGE_MS`, `LOITER_DRIFT_RISING_TICKS`, `LOITER_DRIFT_ZERO_TICKS=5`; helpers `update_drift_estimator`, `apply_drift_compensation`, `get_drift_compensation_body`, `calc_steering_to_heading`, `start_loiter` (Guided), `get_speed_thr_expo` accessor.  
   
-### 4.6 `Mode::set_steering` — `(int16_t)` overflow wrap (BUG IDENTIFIED, FIX PENDING)  
+### 4.6 `Mode::set_steering` — `(int16_t)` overflow wrap (FIXED)  
   
 **Symptom (log 00000105.BIN, t≈10337–10473):** Loiter held a ~135–180° heading error for 137 s while `PIDS` showed the steering PID saturated (P+I+FF ≈ −14.6 every tick). `STER.SteerOut` however oscillated only ±1400 and the boat turned ~1°/s instead of ~272°/s. `WpDist` diverged 1.7→39 m.  
   
@@ -279,21 +273,31 @@ New members: `_steer_floor_active`, `_steering_heading_active_ms`, `_drift_risin
 void Mode::set_steering(float steering_value)  
 {  
     if (allows_stick_mixing() && g2.stick_mixing > 0) {  
-        steering_value = channel_steer->stick_mixing((int16_t)steering_value);  // WRAP  
+        steering_value = channel_steer->stick_mixing((int16_t)constrain_float(steering_value, -4500.0f, 4500.0f));  
     }  
+    g2.motors.set_nav_context(!has_manual_input());  
+    g2.motors.set_pid_steering(true);  
+    g2.motors.set_yaw_rate_max_rads(radians(g2.attitude_control.get_steer_rate_max_degs()));  
     g2.motors.set_steering(steering_value);  
 }  
 ```  
   
 A saturated demand of −18.77×4500 = **−84465** wraps mod 65536 to **−18929** — observed SteerOut −18840 (delta = unlogged D-term). Verified on 6/6 sampled points; wrapped output sits almost exactly on the −65536 boundary, so ±0.3-unit PID jitter sweeps the servo output through zero → average deflection ≈ 0 → self-locking failure. Active because `ModeLoiter::is_autopilot_mode() = true` (`mode.h`) → `allows_stick_mixing()` is true whenever `STICK_MIXING > 0`.  
   
-**Fix (prepared, pending commit):**  
+**Fix (committed):**  
   
-```cpp  
-steering_value = channel_steer->stick_mixing((int16_t)constrain_float(steering_value, -4500.0f, 4500.0f));  
-```  
+void Mode::set_steering(float steering_value)  
+{  
+    if (allows_stick_mixing() && g2.stick_mixing > 0) {  
+        steering_value = channel_steer->stick_mixing((int16_t)constrain_float(steering_value, -4500.0f, 4500.0f));  
+    }  
+    g2.motors.set_nav_context(!has_manual_input());  
+    g2.motors.set_pid_steering(true);  
+    g2.motors.set_yaw_rate_max_rads(radians(g2.attitude_control.get_steer_rate_max_degs()));  
+    g2.motors.set_steering(steering_value);  
+}  
   
-Plus the defense-in-depth clamp in §3.3. Affects **every** autopilot mode (`is_autopilot_mode()=true`) whenever `STICK_MIXING>0` and the heading PID saturates — not just Loiter. Interaction with fork features is positive: §5.3's `get_steering()/4500` normalization and §2.1's `steering_norm` blend both assume ±4500 and currently receive wrapped garbage.  
+Plus the defense-in-depth clamp in §3.3 (now also fixed). Affected **every** autopilot mode (`is_autopilot_mode()=true`) whenever `STICK_MIXING>0` and the heading PID saturated — not just Loiter. §5.3's `get_steering()/4500` normalization and §2.1's `steering_norm` blend now both reliably receive ±4500.  
   
 ## 5. `Rover/mode_loiter.cpp`  
   
@@ -354,7 +358,7 @@ const float drift_mag_mps = MIN(cruise_speed * powf((_drift_i_filt + ff_frac) / 
 // mode_loiter.cpp ~188-193  
 ```  
   
-> **Depends on §4.6 fix:** the `/4500` normalization assumes `_steering ∈ ±4500`. Until the fix is committed, this estimator receives wrapped values whenever the heading PID saturates.  
+> **Depends on §4.6 fix (now committed):** the `/4500` normalization assumes `_steering ∈ ±4500`. Since §4.6 is fixed, this estimator reliably receives correctly clamped values even when the heading PID saturates.  
   
 Tunables: `LOIT_I_EQERR` (throttle-stability window 0.10), `LOIT_I_MIN` (noise floor 0.02), `LOIT_I_ALPHA` (EMA 0.10), `LOIT_I_DISAG` (method-1/method-2 disagreement handling 0.5). The inverse `powf(…, 1/expo)` maps I-term-fraction → equivalent speed using the same `ATC_SPD_EXPO` curve as the forward direction.  
   
@@ -439,8 +443,13 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | `LOIT_COAST_THR` | AP_MotorsUGV | 1 % | coast gate (method 1) |  
 | `LOIT_I_EQERR`/`I_MIN`/`I_ALPHA`/`I_DISAG` | AP_MotorsUGV | 0.10/0.02/0.10/0.5 | method-2 window, noise floor, EMA, disagreement |  
 | `LOIT_ROT_ANG`/`LOIT_ROT_RATE` | AP_MotorsUGV | 15°/20 °/s | rotation gate (method 1); 0 = off |  
+| `VEC_ALLOC` | AP_MotorsUGV | 0 | 0=stock blended atan/direct mapping (§2.1); 1=unified `vectored_allocate()` mapping (surge force, yaw moment) → thruster angle+throttle, with braking-only reverse enforced for autonomous modes |  
+| `SFL_PIVOT` | AP_MotorsUGV | 0.0 % | minimum floor throttle while heading error exceeds `SFL_IFRZ`; 0 disables. Semantic note: intended as full-throttle pivot capability, not scaled off `SFL_MAX` — see §11 open design question |  
+| `VEC_BRK` | AP_MotorsUGV | 100 % | rotation-brake reverse thrust scale; 100 = nominal (|yaw rate|/16 deg/s derated by `reverse_eff=0.8`), 0 disables the brake |  
+| `VEC_YAW_EXP` | AP_MotorsUGV | 1.67 | inverse exponent linearizing yaw-dominant throttle demand (`TurnRate_frac = ThrOut_frac^n` fit from logs); 1.0 = no linearization |  
+| `VEC_BRK_ASYM` | AP_MotorsUGV | 1.25 | multiplier on counter-thrust (braking) demand, rotation-brake and linear surge braking alike, compensating reverse thrust being less efficient than forward; 1.0 = symmetric/off |  
   
----  
+--- 
   
 ## 10. Architectural notes for reviewers  
   
@@ -448,7 +457,7 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 - **Estimator feedback hygiene:** every estimator input is the uncompensated command; every compensation output is applied to a local copy. Violating either rule creates a subtraction loop that under-estimates drift.  
 - **Seed safety:** seeds carry original timestamps → guaranteed aging; `seed_weight ≤ 1` → ping-pong decays; real estimates always outrank seeds; same-tick echo blocked by `DRIFT_SEED_MIN_AGE_MS`; real-destination overwrite blocked by the `*_has_real` guard.  
 - **Units discipline:** speeds m/s, headings centi-degrees, throttle 0–100 % at `calc_throttle` level vs −1..+1 inside `AR_AttitudeControl`, drift estimates always earth-frame NE.  
-- **Normalized steering contract (post-fix):** once §3.3 + §4.6 are committed, `get_steering_out_rate` returns ±1 and `_steering` is always ±4500 centidegrees. Every consumer of `_steering` — vectored blend (§2.1), method-2 estimator (§5.3), `STER.SteerOut` logging — may rely on that range. Until then, treat `_steering` as untrusted under PID saturation.  
+- **Normalized steering contract:** §3.3 + §4.6 are both committed — `get_steering_out_rate` returns ±1 and `_steering` is always ±4500 centidegrees.  
   
 ## 11. Known-open items (deliberate)  
   
@@ -467,12 +476,14 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
   allocator should close δ and return cosδ to forward thrust. This is the  
   missing axis of the vectored control — current atan-boost approximates  
   it indirectly via 1/cos(δ) scaling |  
- | Reverse-gate definition | stern travel = sustained T<0 with |v|<eps  
-  AND |δ|<eps. T<0 opposing v or ω is braking — always legal |  
-  Do to-do patrí „authority(v,δ) normalization" ako budúci krok allocatora, nie ako úprava SPD_EXPO.  
-  „Authority normalization — PID outputs reinterpreted as acceleration/moment demands; allocator divides by measured authority(v,δ) curve. One gain set valid across speed range. Applies to both yaw and surge axes; reverse uses separate curve (decel/accel ≈ 0.8)."  
-  To-do: rýchlostne závislý gain vo vectored_allocate (jedna premenná, nie nová slučka)
-| `stop_vehicle` bypasses `Mode::set_steering` | harmless today (output clamp at `:1130`); unify after §4.6 lands (§4.7) |
+| Reverse-gate definition | stern travel = sustained T<0 with |v|<eps AND |δ|<eps. T<0 opposing v or ω is braking — always legal |
+| `reverse_eff=0.8` hardcoded in `vectored_allocate()` | not exposed as a param; `VEC_BRK_ASYM` (default 1.25) is a separate braking-demand multiplier and does NOT parametrize this constant |  
+| `stop_vehicle` bypasses `Mode::set_steering` | **no longer harmless** — `Mode::set_steering` now also sets `set_nav_context`, `set_pid_steering(true)`, `set_yaw_rate_max_rads`, none of which `stop_vehicle()` sets since it calls `g2.motors.set_steering()` directly (`mode.cpp:483`); rotation-brake/floor logic may be mis-gated during a stop. Needs fix: either make `stop_vehicle()` set these three, or route it through `Mode::set_steering()` |  
+| Counter-rotation gap ("medzera #2") | target behind vehicle, PID has not yet flipped sign of `n` — brake does not engage; explicitly left open per troubleshooting guide, to be addressed via `ATC_STR_DEC_MAX`/`ATC_STR_ACC_MAX` tuning, not new code |  
+  
+### Open design questions  
+- Authority(v,δ) normalization — PID outputs reinterpreted as acceleration/moment demands; allocator would divide by measured authority(v,δ) curve, one gain set valid across speed range. Applies to both yaw and surge axes; reverse uses separate curve (decel/accel ≈ 0.8). Speed-dependent gain in `vectored_allocate` — not yet implemented, needs one new variable (not a new control loop).  
+- Accel/decel ratio for a future translational brake (fx<0) — rotation brake is implemented (`vectored_allocate`'s braking-demand asymmetry block); `VEC_BRK_ASYM` applies identically to both rotation-brake and linear surge braking per the code comment, so this specific item may already be resolved. Needs water-test verification, not new code.  
 ---  
   
 *Caveat: line numbers were taken from git HEAD blame/diffs; the repo search index lags HEAD so exact lines may drift ±a few. `extra_hwdef.dat` and parameter default values were summarized rather than read line-by-line — verify defaults against `AP_MotorsUGV.cpp` `AP_GROUPINFO` table before publishing externally.*  
