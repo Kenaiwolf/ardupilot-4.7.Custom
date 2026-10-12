@@ -341,6 +341,23 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("VEC_BLD_STRT", 45, AP_MotorsUGV, _vec_bld_strt_deg, 70.0f),
 
+	    // @Param: YAW_CRS_RATE
+    // @DisplayName: Yaw pivot cruise rate reference
+    // @Description: Reference yaw rate (deg/s) used to calibrate pivot-mode throttle in the unified allocator, analogous to SPEED_CRUISE for forward motion. Paired with YAW_CRS_THR: at this rate, pivot throttle = YAW_CRS_THR before VEC_YAW_EXP shaping. Should be a rate comfortably inside normal PID authority, not ATC_STR_RAT_MAX
+    // @Units: deg/s
+    // @Range: 1.0 60.0
+    // @User: Advanced
+    AP_GROUPINFO("YAW_CRS_RATE", 46, AP_MotorsUGV, _yaw_crs_rate_dps, 10.0f),
+
+    // @Param: YAW_CRS_THR
+    // @DisplayName: Yaw pivot cruise throttle reference
+    // @Description: Throttle (%) required to sustain YAW_CRS_RATE in pivot mode, analogous to THR_CRUISE. Paired with YAW_CRS_RATE and shaped by VEC_YAW_EXP to derive pivot throttle for other commanded turn rates
+    // @Units: %
+    // @Range: 1.0 100.0
+    // @User: Advanced
+    AP_GROUPINFO("YAW_CRS_THR", 47, AP_MotorsUGV, _yaw_crs_thr_pct, 25.0f),
+
+
     AP_GROUPEND
 };
 
@@ -530,7 +547,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
 
         // VEC_YAW_EXP reattachment: two-zone blend weight w. Below
         // VEC_BLD_START, w=0 (pure surge-cos(delta) geometry, VEC_YAW_EXP
-        // has zero effect). Between VEC_BLD_START and the derived blend-end
+        // has zero effect). Between VEC_BLD_STRT and the derived blend-end
         // (90-VEC_COS_FLR -- the same angle where the cosine floor itself
         // starts engaging), w ramps 0->1 via sin^2 (no slope discontinuity
         // at either boundary). Above blend-end, w=1 (full pivot-style
@@ -542,7 +559,14 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         const float angle_ratio = (bld_end_deg > bld_start_deg) ?
             constrain_float((angle_deg - bld_start_deg) / (bld_end_deg - bld_start_deg), 0.0f, 1.0f) : 1.0f;
         const float w = sq(sinf(angle_ratio * M_PI_2));
-		const float t_pivot = vec_mag;  // or equivalent pivot-style magnitude
+        const float pivot_expo = MAX(_vec_yaw_lin_expo, 1.0f);
+        float t_pivot;
+        if (is_positive(_yaw_crs_rate_dps) && is_positive(_yaw_crs_thr_pct)) {
+            const float rate_ratio = fabsf(n) / _yaw_crs_rate_dps;
+            t_pivot = copysignf((_yaw_crs_thr_pct * 0.01f) * powf(rate_ratio, pivot_expo), n);
+        } else {
+            t_pivot = vec_mag;
+        }
         throttle_norm = t_vector * (1.0f - w) + t_pivot * w;
 
         // braking-demand asymmetry: reverse thrust is less efficient than

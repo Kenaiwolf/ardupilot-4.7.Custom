@@ -331,8 +331,10 @@ private:
     AP_Float _vec_brk_pct;                // VEC_BRK: rotation-brake reverse thrust scale (%), 0 disables
     AP_Float _vec_yaw_lin_expo;           // VEC_YAW_EXP: inverse-exponent linearization of yaw-dominant throttle demand, 1.0=off
     AP_Float _vec_brk_asym;               // VEC_BRK_ASYM: braking-demand multiplier (reverse thrust less efficient than forward), 1.0=off
-    AP_Float _vec_cos_flr_deg;            // VEC_COS_FLR: angular margin (deg) from 90 deg mechanical stop where cos(delta) floor engages, 0=legacy hard threshold
-	AP_Float _vec_bld_strt_deg;           // VEC_BLD_STRT: steering angle (deg) below which throttle is pure geometric decomposition
+    AP_Float _vec_cos_flr_deg;            // VEC_COS_FLR: angular margin (deg) from 90 deg mechanical stop where cos(delta) floor engages, 0=legacy hard threshold  
+	AP_Float _vec_bld_strt_deg;           // VEC_BLD_STRT: steering angle (deg) below which throttle is pure geometric decomposition  
+    AP_Float _yaw_crs_rate_dps;           // YAW_CRS_RATE: reference yaw rate (deg/s) for pivot throttle calibration  
+    AP_Float _yaw_crs_thr_pct;            // YAW_CRS_THR: throttle (%) required to sustain YAW_CRS_RATE in pivot mode  
     bool    _nav_context;                 // true if last steering request came from an autopilot mode
 	bool    _pid_steering;  // true when steering demand came through Mode::set_steering (closed-loop); manual bypass never sets it
 	float   _yaw_rate_max_rads = radians(24.0f);  // physical max turn rate; default = measured pivot plateau
