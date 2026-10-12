@@ -662,10 +662,18 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         if (!_vec_rot_brake_active && rot_brake_trigger) {
             _vec_rot_brake_active = true;
             _vec_rot_brake_angle_rad = steering_angle_rad;
-        } else if (_vec_rot_brake_active && (n * yaw_rate_rads) >= 0.0f) {
-            // measured rotation agrees with commanded direction again:
-            // error has crossed zero (or commanded direction itself
-            // reversed to match) - release, resume normal steering
+        } else if (_vec_rot_brake_active &&
+                   ((n * yaw_rate_rads) >= 0.0f || fabsf(fx) > 0.03f)) {
+            // release on EITHER: (a) measured rotation agrees with commanded
+            // direction again (error crossed zero), or (b) forward/aft
+            // demand (fx) has reappeared - pivot has ended, atan2(n,fx) no
+            // longer sits at/near the +-90deg envelope, so re-triggering the
+            // instant this clears is not possible. fx=0.03 is a wide margin:
+            // even at n=1 it already pulls delta to ~88 deg, well clear of
+            // the vector_angle_max_rad-1e-4 trigger threshold. deliberately
+            // instantaneous - no hysteresis/filter on this fx check, since a
+            // real fx demand reappearing means the PID needs the angle back
+            // immediately, and lock-release delay is the larger risk here
             _vec_rot_brake_active = false;
         }
 
