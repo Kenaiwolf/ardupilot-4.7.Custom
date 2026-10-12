@@ -495,6 +495,7 @@ bool Mode::stop_vehicle()
     // correctly during this phase instead of running on stale flag state.
     g2.motors.set_nav_context(true);
     g2.motors.set_pid_steering(true);
+    g2.motors.set_yaw_rate_max_rads(radians(g2.attitude_control.get_steer_rate_max_degs()));
     g2.motors.set_steering(steering_out * 4500.0);
 
     // return true once stopped
