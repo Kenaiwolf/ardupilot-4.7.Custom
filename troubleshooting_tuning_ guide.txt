@@ -9,7 +9,7 @@ Predpoklady pred ladením (skontrolovať, neladiť):
   hodnoty lámu geometriu foldu a coast logiky)
 - ATC_STR_RAT_MAX  = reálny strop požadovaného turn-rate [deg/s]
 - ATC_STR_ACC_MAX = ATC_STR_DEC_MAX = 45  [deg/s²]  (rampa dopytu;
-  cca zodpovedá dobe presunu serva +90/-90 ~0.7 s)
+  cca zodpovedá dobe presunu serva +90/-90 ~0.8 s)
 - ATC_TURN_MAX_G ponechať default — pri pivote (v=0) je automaticky
   neaktívny, pri plavbe chráni pred príliš ostrým zákrutom
 - MOT_SLEWRATE = 100 (alebo podľa ESC); je to slew limit PLYNU,
@@ -77,12 +77,12 @@ MOT_YAW_CRS_THR [%, default 49]
   motor out) v ustalenom pivote. Pár s YAW_CRS_RATE — vždy sa ladí
   ako dvojica, nie samostatne.
 
-MOT_VEC_YAW_EXP [default 1.67, min 1.0]  
-  Exponent krivky pivot plynu: t_pivot = YAW_CRS_THR *  
-  rate_ratio^VEC_YAW_EXP (rate_ratio = |n| = dopyt/plný rozsah).  
-  VYŠŠÍ exponent = KLESAJÚCA krivka = menej plynu pri malých  
-  dopytoch. Meniť len po kalibrácii CRS dvojice: malé dopyty  
-  dávajú príliš málo rotácie → ZNIZ smerom k 1.0; príliš veľa /  
+MOT_VEC_YAW_EXP [default 1.67, min 1.0]
+  Exponent krivky pivot plynu: t_pivot = YAW_CRS_THR *
+  rate_ratio^VEC_YAW_EXP (rate_ratio = |n| = dopyt/plný rozsah).
+  VYŠŠÍ exponent = KLESAJÚCA krivka = menej plynu pri malých
+  dopytoch. Meniť len po kalibrácii CRS dvojice: malé dopyty
+  dávajú príliš málo rotácie → ZNIZ smerom k 1.0; príliš veľa /
   jitter pri malom dopyte → zdvihni. 1.0 = lineárna krivka.
 
 ------------------------------------------------------------------------
@@ -119,14 +119,14 @@ MOT_VEC_DEADBAND [0-0.2, default 0.03]
   PID pri pokoji. Príliš vysoký → slepá zóna okolo nuly. Príliš
   nízky → jitter serva pri pokoji.
 
-MOT_VEC_BLND_THR [0-1, default 0.15]  
-  Prah filtrovaného throttle, pod ktorým sa uhol blenduje z direct  
-  (steering→angle) do atan2 mapovania. OVERENÉ: allocator ho číta  
-  aj pri FOSSEN=1 — v vectored_allocate() riadi w_lowthr blend pri  
-  malom plyne (prechod direct→atan mapovanie uhla) a škáluje  
-  resid_tc. Pri FOSSEN=0 ho používa legacy cesta rovnako.  
-  Ladiť: zdvihni ak sa pri malom plyne servo správa "nervózne"  
-  (direct mapovanie trvá pridlho), zníž ak pri rozbehu pivotu  
+MOT_VEC_BLND_THR [0-1, default 0.15]
+  Prah filtrovaného throttle, pod ktorým sa uhol blenduje z direct
+  (steering→angle) do atan2 mapovania. OVERENÉ: allocator ho číta
+  aj pri FOSSEN=1 — v vectored_allocate() riadi w_lowthr blend pri
+  malom plyne (prechod direct→atan mapovanie uhla) a škáluje
+  resid_tc. Pri FOSSEN=0 ho používa legacy cesta rovnako.
+  Ladiť: zdvihni ak sa pri malom plyne servo správa "nervózne"
+  (direct mapovanie trvá pridlho), zníž ak pri rozbehu pivotu
   uhol oneskoruje.
 
 MOT_VEC_RESID_TC [s, default 0.5]
@@ -149,9 +149,9 @@ MOT_VEC_BLD_STRT [deg, default 70]
   čistý vektorový prípad.
 
   SKRYTÉ STAVY KTORÉ NETREBA LADIŤ (automatické):
-  - pivot-to-pivot coast: 0.7 s vynúteného nulového plynu po uvoľnení
+  - pivot-to-pivot coast: 0.8 s vynúteného nulového plynu po uvoľnení
     rotation-brake locku, kým servo prechádza stredom. Nie je
-    parameter — hardcoded 700 ms. Ak sa prejaví ako "mŕtvy plyn"
+    parameter — hardcoded 800 ms. Ak sa prejaví ako "mŕtvy plyn"
     po pivot zmene smeru → je to táto funkcia, nie bug.
   - fold hysterézia ±2° okolo 90° — zamedzuje kmítaniu servo pri
     dopyte tesne za hranicou. Hardcoded, neladiť.
@@ -248,7 +248,7 @@ TROUBLESHOOTING — symptóm → pravdepodobná príčina → čo kontrolovať
   → VEC_BRK_ASYM vysoký → zníž
   → ATC_STR_DEC_MAX agresívny → skontroluj rampu dopytu
 
-"Pri zmene smeru otáčania z +pivot na -pivot je mŕtvy interval ~0.7 s"
+"Pri zmene smeru otáčania z +pivot na -pivot je mŕtvy interval ~0.8 s"
   → Toto JE pivot coast, správne chovanie (servo travel time).
     Ak trvá výrazne dlhšie → bug, nahlásiť ako issue.
     Ak sa objaví aj mimo pivot-flip → skontroluj či lock release
@@ -279,7 +279,7 @@ TROUBLESHOOTING — symptóm → pravdepodobná príčina → čo kontrolovať
 
 "Po zmene dopytu z 0 na plnú rotáciu je oneskorenie"
   → Steering output rampa: ATC_STR_ACC_MAX (45 deg/s² je zhruba
-    sync so servo 0.7 s) — ak príliš vysoký, dopyt predbieha servo
+    sync so servo 0.8 s) — ak príliš vysoký, dopyt predbieha servo
     a fold/coast môžu interagovať nepredvídateľne
   → PID I-term windup počas rotation-brake locku: pri ANGLEMAX=90
     je to pokryté limit flags, pri menšom ANGLEMAX overiť
@@ -290,13 +290,13 @@ TROUBLESHOOTING — symptóm → pravdepodobná príčina → čo kontrolovať
   → Slew rate serva pomalšia ako PID predpokladá → ATC_STR_ACC_MAX
     znížiť, alebo ATC_STR_RAT_SMAX pridať proti oscilácii
 
-"Throttle je mŕtvy dlhšie než ~1 s po akomkoľvek manévri"  
-  → Pivot coast trvá max 700 ms od uvoľnenia locku a potom sa  
-    vždy sám ukončí — stuck nie je možný. Ak trvá dlhšie:  
-    a) VEC_DEADBAND príliš vysoký → vec_mag pod prahom drží  
-       throttle na 0 cez w_db blend (zniz deadband)  
-    b) lock sa cyklicky re-aktivuje (throttle jde cez VEC_BRK  
-       vetvu, nie pivot) → skontroluj VEC_BRK ladenie  
+"Throttle je mŕtvy dlhšie než ~1 s po akomkoľvek manévri"
+  → Pivot coast trvá max 800 ms od uvoľnenia locku a potom sa
+    vždy sám ukončí — stuck nie je možný. Ak trvá dlhšie:
+    a) VEC_DEADBAND príliš vysoký → vec_mag pod prahom drží
+       throttle na 0 cez w_db blend (zniz deadband)
+    b) lock sa cyklicky re-aktivuje (throttle jde cez VEC_BRK
+       vetvu, nie pivot) → skontroluj VEC_BRK ladenie
     c) vyššie vrstvy: motor limit flags, disarm, failsafe
 
 ========================================================================
