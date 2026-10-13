@@ -541,9 +541,12 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // the only protection here when VEC_RESID_TC=0 (no input filtering)
         const float fold_eps_rad = radians(2.0f);
         if (_vec_folded) {
-            delta = is_positive(delta) ? (delta - M_PI) : (delta + M_PI);
+            // unfold test on the RAW delta: demand must return inside
+            // +/-88deg (forward hemisphere) before we stop folding
             if (fabsf(delta) < M_PI_2 - fold_eps_rad) {
                 _vec_folded = false;
+            } else {
+                delta = is_positive(delta) ? (delta - M_PI) : (delta + M_PI);
             }
         } else if (fabsf(delta) > M_PI_2 + fold_eps_rad) {
             delta = is_positive(delta) ? (delta - M_PI) : (delta + M_PI);
