@@ -387,7 +387,7 @@ void Mode::calc_throttle(float target_speed, bool avoidance_enabled)
     // NOTE: cosine reduction runs on the PID part only - drift-FF is added
     // AFTER it below, otherwise FF would be zeroed exactly at large crab
     // angles where drift-hold needs it most
-    if (g2.motors.have_vectored_thrust() && steering_heading_fresh && !g2.motors.get_vec_fossen()) {
+    if (g2.motors.have_vectored_thrust() && steering_heading_fresh && !g2.motors.use_vec_fossen()) {
 
         // 1. Cosine Throttle Reduction: reduce forward throttle at large heading error.
         // only scale forward thrust - a negative (braking) PID demand must pass
@@ -498,7 +498,6 @@ bool Mode::stop_vehicle()
     // correctly during this phase instead of running on stale flag state.
     g2.motors.set_nav_context(true);
     g2.motors.set_pid_steering(true);
-    g2.motors.set_yaw_rate_max_rads(radians(g2.attitude_control.get_steer_rate_max_degs()));
     g2.motors.set_steering(steering_out * 4500.0);
 
     // return true once stopped
@@ -862,9 +861,6 @@ void Mode::set_steering(float steering_value)
     // any steering demand through this path is closed-loop (PID-shaped);
     // Manual bypasses Mode::set_steering entirely and leaves it false
     g2.motors.set_pid_steering(true);
-    // propagate the configured turn-rate ceiling so vectored_allocate's
-    // rotation-brake scaling tracks ATC_STR_RAT_MAX without a hardcode
-    g2.motors.set_yaw_rate_max_rads(radians(g2.attitude_control.get_steer_rate_max_degs()));
     g2.motors.set_steering(steering_value);
 }
 
