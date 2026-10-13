@@ -103,6 +103,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
                                      bool nav_mode, float &steering_cd, float &throttle_pct, float dt)
 // AP_MotorsUGV.cpp ~456-457
 ```
+
 ## 3. `libraries/APM_Control/AR_AttitudeControl.cpp/.h`
 
 ### 3.1 Nonlinear speed→throttle feed-forward (`ATC_SPD_EXPO`)
@@ -458,27 +459,38 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 - **Units discipline:** speeds m/s, headings centi-degrees, throttle 0–100 % at `calc_throttle` level vs −1..+1 inside `AR_AttitudeControl`, drift estimates always earth-frame NE.
 - **Normalized steering contract:** §3.3 + §4.6 are both committed — `get_steering_out_rate` returns ±1 and `_steering` is always ±4500 centidegrees.
 
-## 11. Known-open items
+## 11. Resolved design items and known behaviors
 
-| Item | Status |
+This section documents decisions made during the vectored-thrust allocator rework (VEC_FOSSEN path). Items below are closed — either implemented in code or deliberately rejected/handled by tuning — and are kept here so reviewers understand *why* the code looks the way it does.
+
+### Implemented since last review
+
+| Item | Resolution |
 |---|---|
+| Rotation-brake redesign | servo locks at deflection limit, brake thrust proportional to `\|n\|` scaled by `VEC_BRK`*`VEC_BRK_ASYM`; release on yaw-agreement `(n*yaw_rate) >= 0` or `\|fx\| > 0.03` (no hysteresis) — commits `21bf8fb0`, `4380a9cd` |
+| Brake trigger noise guard | `rot_brake_trigger` requires `vec_mag >= VEC_DEADBAND` AND `(n*yaw_rate) < 0.01` — prevents noise-level sign flips from latching the lock while `w_db` suppresses output |
+| `rate_ratio` unit mismatch | fixed — `n` is now normalized by `YAW_CRS_RATE` (deg/s), so `t_pivot = YAW_CRS_THR * rate_ratio^VEC_YAW_EXP` equals `YAW_CRS_THR` at exactly `YAW_CRS_RATE`; previously `n` (dimensionless) was divided by `yaw_rate_max` making `YAW_CRS_THR` unreachable — commit `82ab96bb`, dead `yaw_rate_max` local removed |
+| `VEC_DEADBAND` hard switch | replaced by sin² S-curve blend `w_db` — full normal path always computes, output blends between frozen hold-state and computed values across the deadband edge; `w_db` forced to 1 while rotation-brake lock is active — commit `bbc508af` + gate commit |
+| `stop_vehicle` flag bypass | resolved (`f6d3e4d3`, `a1bd7a7c`) — asserts `set_nav_context`, `set_pid_steering`, `set_yaw_rate_max_rads` before `set_steering`; `Mode::set_steering` bypass is deliberate |
+| SFL/steering-floor duplication | SFL gated to legacy path only — `use_vec_fossen()` must be false for the floor to apply (`mode.cpp:429`); allocator covers pivot authority via `t_pivot`, SFL was a pre-allocator patch, not a foundation — commits `41a022a2`, `c36969ff` (param name fix `use_vec_alloc` → `use_vec_fossen`) |
+| Pivot-to-pivot transit (coast) | after yaw-agreement lock release, `throttle_norm = 0` for a fixed 700 ms window — covers full servo transit so no thrust lands through intermediate angles (contaminating surge/wrong-way torque); early exit only on `\|fx\| > 0.03`; re-lock on SAME side cancels instantly; opposite-side re-lock does NOT shorten the window — commit `72a193b4` |
+| Fold-boundary chatter | hysteresis implemented — `fold-in` at `\|delta\| > 90°+2°`, `fold-out` at `\|delta\| < 90°-2°`, single `_vec_folded` bool; protects `VEC_RESID_TC=0` or very small TC — commit `dfa31ace` |
+| `VEC_BRK` `@Description` comment | corrected — current code uses `\|n\| * VEC_BRK * VEC_BRK_ASYM`; old `\|yaw rate\|/16deg/s + 0.8` formula no longer exists |
 | Speed-PID I-freeze hold-vs-decay | reviewed — current hold-or-decay is **correct**, see §4.4 |
-| `MOT_VEC_ANGLEMAX=90` boost spike near 89° | kept — clamping removes turn authority at speed |
-| Follow mode: no estimator feed | Follow→Loiter starts cold; documented |
-| Slew-rate limiting on vectored angle | optional future improvement if water tests show a throttle stumble |
-| SFL_PIVOT semantics | meant as full-throttle pivot capability (default ~100%), not scaled off SFL_MAX; rotation limit should come from G-limit + physics only |
-| Yaw rate cap during pivot | at δ=90°, T=100% the turn-rate loop has no lever left — rate is set by hull drag/G only; verify water test shows acceptable peak deg/s |
-| Reverse-gate definition | stern travel = sustained T<0 with |v|<eps AND |δ|<eps. T<0 opposing v or ω is braking — always legal |
-| Stale `VEC_BRK` `@Description` comment (AP_MotorsUGV.cpp:308) | comment referenced a `|yaw rate|/16deg/s` + `0.8` formula from an earlier version of the brake; current code uses `|n| * VEC_BRK * VEC_BRK_ASYM` only — comment corrected, this item is now resolved, not open |
-`stop_vehicle` bypasses `Mode::set_steering` | resolved (commits f6d3e4d3, a1bd7a7c) — stop_vehicle() now asserts all three flags before g2.motors.set_steering(): set_nav_context(true), set_pid_steering(true), and set_yaw_rate_max_rads(radians(get_steer_rate_max_degs())) (`mode.cpp:496-498`), deliberately still bypassing Mode::set_steering() itself (its stick-mixing re-read and slew/wrap handling are irrelevant/unsafe mid-stop). No open question remains |
-Counter-rotation gap | target behind vehicle, PID has not yet flipped sign of n — brake does not engage; left open, to be addressed via ATC_STR_DEC_MAX/ATC_STR_ACC_MAX tuning, not new code |
-| Hull jerk at rotation→brake transition | throttle can step +100→-80→+60; no direct param today — tune ATC_STR_DEC_MAX up as primary damping (brake should be a backstop, not the main tool); if still jerky, temporarily lower MOT_VEC_BRK to 50-70% and accept more overshoot |
-| Fold-boundary chatter hysteresis | conditionally open — only needed if VEC_RESID_TC filtering proves insufficient; not yet implemented |
 
-### Open design questions
-Authority(v,δ) normalization — PID outputs reinterpreted as acceleration/moment demands; allocator would divide by measured authority(v,δ) curve, one gain set valid across speed range. Applies to both yaw and surge axes; reverse-thrust asymmetry is already handled separately via `VEC_BRK_ASYM` (not a hardcoded 0.8 — that value no longer exists in code). Speed-dependent gain in `vectored_allocate` — not yet implemented, needs one new variable (not a new control loop).
-- Accel/decel ratio for a future translational brake (fx<0) — rotation brake is implemented (`vectored_allocate`'s braking-demand asymmetry block); `VEC_BRK_ASYM` applies identically to both rotation-brake and linear surge braking per the code comment, so this specific item may already be resolved. Needs water-test verification, not new code.
+### Closed by decision / tuning — no code needed
 
+| Item | Rationale |
+|---|---|
+| Yaw rate cap during pivot | not a code item — `YAW_CRS_THR`/`YAW_CRS_RATE` is a **calibration point**, not a limit; the actual rate cap is `ATC_STR_RAT_MAX` (+ `ATC_TURN_MAX_G` when moving). If measured peak ω is wrong, re-tune `YAW_CRS_*`/`VEC_YAW_EXP`/`ATC_STR_RAT_MAX`. One-time water-test verification, then close. |
+| Counter-rotation gap | pure servo-travel + inertia latency, not a logic hole — after lock release the pivot condition is simply not met until the servo reaches the opposite stop; `n` flips instantly, PID ramps via `ATC_STR_ACC_MAX`/`DEC_MAX` (45 deg/s²). Coast suppression (`72a193b4`) already removes thrust through the transit. Handle via tuning, not code. |
+| Slew-rate limiting on vectored angle | not needed — `ATC_STR_RAT_SMAX` (SlewLimiter in AC_PID) already filters `n` upstream; angle slew equals rate slew via the direct-angle map. A dedicated servo-angle slew limit is optional future work only if water tests show a throttle stumble. |
+| Authority(v,δ) normalization | **rejected** — mid-range (δ≈30-60°) is transient in real operation; residual demand error integrates into the drift estimator and is absorbed by the drift-FF loop; measuring the actual authority surface is disproportionate to the marginal benefit. Mid-band geometry error exists in principle but is masked by hull-drag asymmetry and washed out by closed-loop correction. |
+| Accel/decel ratio (translational brake) | already covered — `VEC_BRK_ASYM` applies identically to rotation-brake and linear surge braking; no separate ratio needed. Water-test verification only. |
+| `MOT_VEC_ANGLEMAX=90` boost spike near 89° | kept deliberately — clamping removes turn authority at speed; spike is preferred over dead angle |
+| Follow mode: no estimator feed | documented — Follow→Loiter starts cold; inherent limitation |
+| Reverse-gate definition | stern travel = sustained T<0 with `\|v\|<eps` AND `\|δ\|<eps`; T<0 opposing v or ω is braking — always legal |
+| Hull jerk at rotation→brake transition | tuning only — raise `ATC_STR_DEC_MAX` as primary damping (brake is a backstop); if still jerky, temporarily lower `VEC_BRK` to 50-70 % and accept more overshoot |
 ---
 
 *Caveat: line numbers were taken from git HEAD blame/diffs; the repo search index lags HEAD so exact lines may drift ±a few. `extra_hwdef.dat` and parameter default values were summarized rather than read line-by-line — verify defaults against `AP_MotorsUGV.cpp` `AP_GROUPINFO` table before publishing externally.*
