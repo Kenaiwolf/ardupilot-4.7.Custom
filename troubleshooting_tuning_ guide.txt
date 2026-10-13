@@ -1,307 +1,312 @@
-PRACOVNA VERZIA ZATIAL NEREVIDOVANA NEPOUZIVAT AKO ZDROJ INFORMACII 
-========================================================================  
-VECTORED-THRUST ROVER — TUNING & TROUBLESHOOTING GUIDE  
-branch rover-4.7-custom, allocator = MOT_VEC_FOSSEN=1  
-========================================================================  
-  
-Predpoklady pred ladením (skontrolovať, neladiť):  
-- MOT_VEC_ANGLEMAX = 90  (allocator je navrhnutý na plný rozsah; menšie  
-  hodnoty lámu geometriu foldu a coast logiky)  
-- ATC_STR_RAT_MAX  = reálny strop požadovaného turn-rate [deg/s]  
-- ATC_STR_ACC_MAX = ATC_STR_DEC_MAX = 45  [deg/s²]  (rampa dopytu;  
-  cca zodpovedá dobe presunu serva +90/-90 ~0.7 s)  
-- ATC_TURN_MAX_G ponechať default — pri pivote (v=0) je automaticky  
-  neaktívny, pri plavbe chráni pred príliš ostrým zákrutom  
-- MOT_SLEWRATE = 100 (alebo podľa ESC); je to slew limit PLYNU,  
-  nie uhla serva — nepliest  
-- ATC_STR_RAT_SMAX len ak PID osciluje (upstream filter; nie je nutný)  
-  
-Logovanie: zapnúť tuning graph desired vs achieved pre steering  
-(turn rate). Väčšina diagnostiky nižšie na ňom stojí.  
-  
-========================================================================  
-PORADIE LADENIA — prečo práve takto  
-========================================================================  
-Allocator má tri režimy delené geometriou uhla serva:  
-  surge-dominant   (delta < ~70 deg)  ... surge krivka, drift kompenzácia  
-  blend pásmo      (~70-90 deg)       ... VEC_BLD_STRT až doraz  
-  pivot-dominant   (delta ~90 deg)    ... YAW_CRS_*/VEC_YAW_EXP, brake  
-  
-Kalibrácia musí ísť od jednoduchého k zloženému:  
-1. najprv surge (priama plavba) — bez neho sa nedá merať nič iné,  
-   lebo všetko ostatné stojí na vec_mag a filtrovanom throttle  
-2. potom pivot krivka (YAW_CRS_RATE/THR + VEC_YAW_EXP) — meraná  
-   pri statickom otáčaní, nezávislá od surge  
-3. potom brzda (VEC_BRK + VEC_BRK_ASYM) — závisí od pivot krivky,  
-   lebo brzdiacu silu škáluje voči |n| a reverznej účinnosti  
-4. nakoniec ochranneľ/estetické vrstvy: deadband blend, coast,  
-   fold hysterézia, drift kompenzácia  
-  
-Ak meníš ktorýkoľvek parameter nižšie, over že vyššie vrstvy sú už  
-naladené — napr. zle naladená pivot krivka sa prejaví ako "nefunkčná  
-brzda", hoci VEC_BRK je v poriadku.  
-  
-========================================================================  
-PARAMETRE — poradie nastavenia, heslovito  
-========================================================================  
-  
-------------------------------------------------------------------------  
-FÁZA 0 — voľba cesty  
-------------------------------------------------------------------------  
-MOT_VEC_FOSSEN = 1  → unified allocator (zapína všetko nižšie).  
-  0 = legacy cesta: SFL_* floor + cosine reduction sú aktívne len tu.  
-  Pozor: pri 1 sú SFL_DB/GAIN/MAX/PIVOT mŕtve — neladiť ich.  
-  
-------------------------------------------------------------------------  
-FÁZA 1 — surge (priama plavba), bežné ATC/MOT parametre  
-------------------------------------------------------------------------  
-Najprv štandardné ladenie bez vectored špecifík:  
-- THR_CRUISE / CRUISE_SPEED / ATC_SPD_*  → normálny speed tuning  
-- ATC_STR_RAT_* PID gains → normálny steering tuning pri plavbe  
-- MOT_THST_EXPO → tvar throttle→ťah krivky dopredu  
-- MOT_THST_ASYM → pomer forward/reverse účinnosti (upstreame;  
-  VEC_BRK_ASYM ide NAD tento pomer len pre brzdenie)  
-  
-------------------------------------------------------------------------  
-FÁZA 2 — pivot krivka (jadro allocatora)  
-------------------------------------------------------------------------  
-MOT_YAW_CRS_RATE [deg/s, default 16]  
-  Kalibračný bod: referenčná rýchlosť otáčania na mieste. NIE je to  
-  limit — limit je ATC_STR_RAT_MAX. Zvoliť rýchlosť, ktorú loď  
-  pohodlne dosiahne plnou pákou v Acro (meraný "plateau" rate).  
-  Postup: Acro, plná páka, z logu odčítať ustalený deg/s → sem.  
-  
-MOT_YAW_CRS_THR [%, default 49]  
-  Koľko % plynu treba na udržanie YAW_CRS_RATE. Merané: pri plnej  
-  páke v Acro odčítať skutočný throttle výstup z logu (Rousing/  
-  motor out) v ustalenom pivote. Pár s YAW_CRS_RATE — vždy sa ladí  
-  ako dvojica, nie samostatne.  
-  
-MOT_VEC_YAW_EXP [default 1.67]  
-  Exponent lineárnej krivky pivot plynu: t_pivot =  
-  YAW_CRS_THR * (rate_ratio)^(1/VEC_YAW_EXP). Nefitovaný na presnú  
-  krivku — default 1.67 je z logu merania. Meniť len ak po  
-  kalibrácii CRS dvojice platí: malé dopyty dávajú príliš málo  
-  (zdvihni) alebo príliš veľa (zníž) rotácie.  
-  VZÁJOMNÝ VZŤAH: YAW_CRS_* kalibruje jeden bod krivky,  
-  VEC_YAW_EXP jej tvar — najprv bod, potom tvar, nikdy naopak.  
-  
-------------------------------------------------------------------------  
-FÁZA 3 — rotation brake  
-------------------------------------------------------------------------  
-MOT_VEC_BRK [%, default 100, range 0-200, 0=vypnutá]  
-  Škála reverzného protiťahu pri brzde rotácie. Aktivuje sa len pri  
-  servo v doraze (90°) a PID žiada opačnú rotáciu, než loď reálne má.  
-  LADENIE (kruhový manéver v Acro):  
-    1. Acro mode, plná páka do jednej strany, nechať loď roztočiť  
-    2. Skokovo pustiť páku (dopyt → 0)  
-    3. Sledovať dobeh rotácie po pustení — tuning graph desired vs  
-       achieved na steering  
-    4. Cieľ: minimálny dobeh, ale ŽIADNA spätná oscilácia do opačného  
-       smeru  
-    5. Dobeh dlhý → zvýš VEC_BRK. Loď sa po pustení prehoupne a vracia  
-       sa späť → zníž VEC_BRK.  
-  Typický štart: 100. Pri silnej inercii trupu hore, pri agresívnej  
-  brzde oscilácii dole.  
-  
-MOT_VEC_BRK_ASYM [default 1.24]  
-  Násobič reverznej účinnosti — reverz produkuje menej ťahu pri  
-  rovnakom PWM. Používa sa v rotation-brake AJ linear surge brake.  
-  Ak loď brzdí rotáciu zjavne pomalšie, než zodpovedá VEC_BRK,  
-  a reverzný ťah je známy slabší → zdvihni. 1.0 = symetria (off).  
-  Naliať opatrne — prehnanie = oscilácia aj pri správnom VEC_BRK.  
-  
-------------------------------------------------------------------------  
-FÁZA 4 — hranice a prechody allocatora  
-------------------------------------------------------------------------  
-MOT_VEC_DEADBAND [0-0.2, default 0.03]  
-  Práh vec_mag pod ktorým sa blenduje do "zamrznutého" stavu.  
-  S-curve blend (nie hard switch). Nastaviť tesne nad šum sticks/  
-  PID pri pokoji. Príliš vysoký → slepá zóna okolo nuly. Príliš  
-  nízky → jitter serva pri pokoji.  
-  
+PRACOVNA VERZIA ZATIAL NEREVIDOVANA NEPOUZIVAT AKO ZDROJ INFORMACII
+========================================================================
+VECTORED-THRUST ROVER — TUNING & TROUBLESHOOTING GUIDE
+branch rover-4.7-custom, allocator = MOT_VEC_FOSSEN=1
+========================================================================
+
+Predpoklady pred ladením (skontrolovať, neladiť):
+- MOT_VEC_ANGLEMAX = 90  (allocator je navrhnutý na plný rozsah; menšie
+  hodnoty lámu geometriu foldu a coast logiky)
+- ATC_STR_RAT_MAX  = reálny strop požadovaného turn-rate [deg/s]
+- ATC_STR_ACC_MAX = ATC_STR_DEC_MAX = 45  [deg/s²]  (rampa dopytu;
+  cca zodpovedá dobe presunu serva +90/-90 ~0.7 s)
+- ATC_TURN_MAX_G ponechať default — pri pivote (v=0) je automaticky
+  neaktívny, pri plavbe chráni pred príliš ostrým zákrutom
+- MOT_SLEWRATE = 100 (alebo podľa ESC); je to slew limit PLYNU,
+  nie uhla serva — nepliest
+- ATC_STR_RAT_SMAX len ak PID osciluje (upstream filter; nie je nutný)
+
+Logovanie: zapnúť tuning graph desired vs achieved pre steering
+(turn rate). Väčšina diagnostiky nižšie na ňom stojí.
+
+========================================================================
+PORADIE LADENIA — prečo práve takto
+========================================================================
+Allocator má tri režimy delené geometriou uhla serva:
+  surge-dominant   (delta < ~70 deg)  ... surge krivka, drift kompenzácia
+  blend pásmo      (~70-90 deg)       ... VEC_BLD_STRT až doraz
+  pivot-dominant   (delta ~90 deg)    ... YAW_CRS_*/VEC_YAW_EXP, brake
+
+Kalibrácia musí ísť od jednoduchého k zloženému:
+1. najprv surge (priama plavba) — bez neho sa nedá merať nič iné,
+   lebo všetko ostatné stojí na vec_mag a filtrovanom throttle
+2. potom pivot krivka (YAW_CRS_RATE/THR + VEC_YAW_EXP) — meraná
+   pri statickom otáčaní, nezávislá od surge
+3. potom brzda (VEC_BRK + VEC_BRK_ASYM) — závisí od pivot krivky,
+   lebo brzdiacu silu škáluje voči |n| a reverznej účinnosti
+4. nakoniec ochranneľ/estetické vrstvy: deadband blend, coast,
+   fold hysterézia, drift kompenzácia
+
+Ak meníš ktorýkoľvek parameter nižšie, over že vyššie vrstvy sú už
+naladené — napr. zle naladená pivot krivka sa prejaví ako "nefunkčná
+brzda", hoci VEC_BRK je v poriadku.
+
+========================================================================
+PARAMETRE — poradie nastavenia, heslovito
+========================================================================
+
+------------------------------------------------------------------------
+FÁZA 0 — voľba cesty
+------------------------------------------------------------------------
+MOT_VEC_FOSSEN = 1  → unified allocator (zapína všetko nižšie).
+  0 = legacy cesta: SFL_* floor + cosine reduction sú aktívne len tu.
+  Pozor: pri 1 sú SFL_DB/GAIN/MAX/PIVOT mŕtve — neladiť ich.
+
+------------------------------------------------------------------------
+FÁZA 1 — surge (priama plavba), bežné ATC/MOT parametre
+------------------------------------------------------------------------
+Najprv štandardné ladenie bez vectored špecifík:
+- THR_CRUISE / CRUISE_SPEED / ATC_SPD_*  → normálny speed tuning
+- ATC_STR_RAT_* PID gains → normálny steering tuning pri plavbe
+- MOT_THST_EXPO → tvar throttle→ťah krivky dopredu
+- MOT_THST_ASYM → pomer forward/reverse účinnosti (upstreame;
+  VEC_BRK_ASYM ide NAD tento pomer len pre brzdenie)
+
+------------------------------------------------------------------------
+FÁZA 2 — pivot krivka (jadro allocatora)
+------------------------------------------------------------------------
+MOT_YAW_CRS_RATE [deg/s, default 16]
+  Kalibračný bod: referenčná rýchlosť otáčania na mieste. NIE je to
+  limit — limit je ATC_STR_RAT_MAX. Zvoliť rýchlosť, ktorú loď
+  pohodlne dosiahne plnou pákou v Acro (meraný "plateau" rate).
+  Postup: Acro, plná páka, z logu odčítať ustalený deg/s → sem.
+
+MOT_YAW_CRS_THR [%, default 49]
+  Koľko % plynu treba na udržanie YAW_CRS_RATE. Merané: pri plnej
+  páke v Acro odčítať skutočný throttle výstup z logu (Rousing/
+  motor out) v ustalenom pivote. Pár s YAW_CRS_RATE — vždy sa ladí
+  ako dvojica, nie samostatne.
+
+MOT_VEC_YAW_EXP [default 1.67, min 1.0]  
+  Exponent krivky pivot plynu: t_pivot = YAW_CRS_THR *  
+  rate_ratio^VEC_YAW_EXP (rate_ratio = |n| = dopyt/plný rozsah).  
+  VYŠŠÍ exponent = KLESAJÚCA krivka = menej plynu pri malých  
+  dopytoch. Meniť len po kalibrácii CRS dvojice: malé dopyty  
+  dávajú príliš málo rotácie → ZNIZ smerom k 1.0; príliš veľa /  
+  jitter pri malom dopyte → zdvihni. 1.0 = lineárna krivka.
+
+------------------------------------------------------------------------
+FÁZA 3 — rotation brake
+------------------------------------------------------------------------
+MOT_VEC_BRK [%, default 100, range 0-200, 0=vypnutá]
+  Škála reverzného protiťahu pri brzde rotácie. Aktivuje sa len pri
+  servo v doraze (90°) a PID žiada opačnú rotáciu, než loď reálne má.
+  LADENIE (kruhový manéver v Acro):
+    1. Acro mode, plná páka do jednej strany, nechať loď roztočiť
+    2. Skokovo pustiť páku (dopyt → 0)
+    3. Sledovať dobeh rotácie po pustení — tuning graph desired vs
+       achieved na steering
+    4. Cieľ: minimálny dobeh, ale ŽIADNA spätná oscilácia do opačného
+       smeru
+    5. Dobeh dlhý → zvýš VEC_BRK. Loď sa po pustení prehoupne a vracia
+       sa späť → zníž VEC_BRK.
+  Typický štart: 100. Pri silnej inercii trupu hore, pri agresívnej
+  brzde oscilácii dole.
+
+MOT_VEC_BRK_ASYM [default 1.24]
+  Násobič reverznej účinnosti — reverz produkuje menej ťahu pri
+  rovnakom PWM. Používa sa v rotation-brake AJ linear surge brake.
+  Ak loď brzdí rotáciu zjavne pomalšie, než zodpovedá VEC_BRK,
+  a reverzný ťah je známy slabší → zdvihni. 1.0 = symetria (off).
+  Naliať opatrne — prehnanie = oscilácia aj pri správnom VEC_BRK.
+
+------------------------------------------------------------------------
+FÁZA 4 — hranice a prechody allocatora
+------------------------------------------------------------------------
+MOT_VEC_DEADBAND [0-0.2, default 0.03]
+  Práh vec_mag pod ktorým sa blenduje do "zamrznutého" stavu.
+  S-curve blend (nie hard switch). Nastaviť tesne nad šum sticks/
+  PID pri pokoji. Príliš vysoký → slepá zóna okolo nuly. Príliš
+  nízky → jitter serva pri pokoji.
+
 MOT_VEC_BLND_THR [0-1, default 0.15]  
   Prah filtrovaného throttle, pod ktorým sa uhol blenduje z direct  
-  (steering→angle) do atan2 mapovania. Ovplyvňuje len VEC_FOSSEN=0  
-  legacy cestu? — OVERIŤ v kóde či allocator tento prah číta; ak  
-  nie, pri FOSSEN=1 ignorovať. [FLAG: neoverené či allocator  
-  používa _vec_blend_thr — v čase písania je tento bod otvorený]  
-  
-MOT_VEC_RESID_TC [s, default 0.5]  
-  Časová konštanta LPF na throttle/steering pred výberom režimu.  
-  Väčšia = hlavšie prepínanie surge/pivot, ale pomalšia odozva na  
-  reálnu zmenu dopytu. Meniť len ak sa pri prechodoch objaví  
-  zreteľné kmítanie režimov — inak nechať default.  
-  
-MOT_VEC_COS_FLR [deg, default 10]  
-  Pásmo okolo mechanického dorazu (90°), kde sa zapína floor proti  
-  deleniu cos(δ)→0. 0 = vypnuté (nebezpečné — blowup pri δ→90°).  
-  Prakticky nemenit; zmeniť len ak ANGLEMAX nie je 90 (vtedy by  
-  floor nesedel s mechanikou — ale allocator aj tak vyžaduje 90).  
-  
-MOT_VEC_BLD_STRT [deg, default 70]  
-  Uhol serva, od ktorého sa začína blend medzi geometrickou surge  
-  krivkou a pivot krivkou (t_vector ↔ t_pivot). Pod týmto uhlom  
-  platí čistá surge geometria. Nastaviť podľa mechaniky — kde sa  
-  thruster prestane správať ako "kormidlo+skrutka vpredu" a začína  
-  čistý vektorový prípad.  
-  
-  SKRYTÉ STAVY KTORÉ NETREBA LADIŤ (automatické):  
-  - pivot-to-pivot coast: 0.7 s vynúteného nulového plynu po uvoľnení  
-    rotation-brake locku, kým servo prechádza stredom. Nie je  
-    parameter — hardcoded 700 ms. Ak sa prejaví ako "mŕtvy plyn"  
-    po pivot zmene smeru → je to táto funkcia, nie bug.  
-  - fold hysterézia ±2° okolo 90° — zamedzuje kmítaniu servo pri  
-    dopyte tesne za hranicou. Hardcoded, neladiť.  
-  
-------------------------------------------------------------------------  
-FÁZA 5 — drift kompenzácia (Loiter/Nav feed-forward)  
-------------------------------------------------------------------------  
-Zásada: najprv naladiť allocator (fázy 1-4), až potom drift FF —  
-inak kompenzuješ chyby ladenia, nie skutočný drift.  
-  
-MOT_DRIFT_G_LOIT / MOT_DRIFT_G_NAV [0-2, default 1.0]  
-  Gain aplikovaný na odhad driftu pri zápise (write-time). >1 =  
-  agresívnejšia kompenzácia. Ak loď v Loiter stále unáša → zdvihni  
-  postupne; ak sa správa "hyperkorektne" (prekompenzuje, osciluje  
-  okolo hold pozície) → zníž. Ladí sa na vode za reálneho vetra/  
-  prúdenia, nie v bazéne.  
-  
-MOT_DRIFT_MAXAGE [s, default 1800]  
-  Ako dlho starý odhad ešte platí. Príliš dlhé = loď kompenzuje  
-  včerajší vietor. Krátke = po každom manévri stratí pamäť.  
-  0 = nikdy neveriť odhadu (prakticky vypína funkciu).  
-  
-LOIT_DRF_MIN [m/s, default 0.03]  
-  Prahou aktivácie drift kompenzácie v Loiter — pod týmto odhadom  
-  sa nepovažuje za drift (chráni proti GPS šumu).  
-  
-LOIT_CST_THR [%, default 1.0]  
-  Throttle pod ktorým sa loď považuje za "coasting" — okno na  
-  meranie driftu metódou 1. Ak je speed PID pri držaní pozície  
-  neustále nad týmto, metóda 1 nikdy nevzoriekuje.  
-  
-LOIT_I_EQERR [m/s, default 0.10]  
-  Chyba speed-PID, pod ktorou sa I-term považuje za drift  
-  equilibrium — vstupná podmienka metódy 2.  
-  
-LOIT_I_MIN [0-0.5, default 0.02]  
-  Minimálny I-term akceptovaný ako drift sample.  
-  
-LOIT_I_ALPHA [0.01-1.0, default 0.10]  
-  EMA váha nového sample. Menšia = pomalšia, stabilnejšia krivka;  
-  väčšia = rýchlejšia, hlučnejšia. Pri jednorazovom ladení nechať.  
-  
-LOIT_I_DISAG [0.1-2.0, default 0.5]  
-  Ak nový odhad nesúhlasí s uloženým o viac než tento zlomok,  
-  blenduje sa len 25 % — ochrana proti výskokom.  
-  
-LOIT_ROT_ANG [deg, default 15, 0=vypnuté]  
-  Servo deflection nad ktorou sa blok coast vzorkovanie —  
-  rotácia loďou generuje falošnú laterálnu rýchlosť na IMU.  
-  
-LOIT_ROT_RAT [deg/s, default 20, 0=vypnuté]  
-  Yaw rate gate pre coast sampling. 45 deg/s ≈ 0.5 m/s falošný  
-  drift — drž pod reálnym driftom.  
-  
-DRIFT_EST_YR [deg/s, default 15]  
-  Sprísnený yaw rate gate pre nav/G guided drift estimator.  
-  Musí byť < LOIT_ROT_RAT (estimator potrebuje čistšie okná).  
-  
-VZÁJOMNÉ VZŤAHY drift parametrov:  
-- LOIT_ROT_RAT > DRIFT_EST_YR vždy (estimator je konzervatívnejší)  
-- LOIT_CST_THR a I_EQERR definujú *kedy* sa meria — ak sú tesné,  
-  metódy nikdy nevzorkujú a DRIFT_G_* nemajú čo škálovať  
-- DRIFT_MAXAGE chráni celý subsystém — ak je 0, všetko ostatné  
-  je mŕtve nezávisle od ostatných hodnôt  
-  
-------------------------------------------------------------------------  
-LEGACY PARAMETRE — aktívne len pri VEC_FOSSEN=0  
-------------------------------------------------------------------------  
-SFL_DB / SFL_GAIN / SFL_MAX / SFL_PIVOT / SFL_IFRZ  
-  Steering-floor systém (pre-Fossen zaplata). Pri allocatori  
-  zamietnuté — jeho funkciu prevzal t_pivot krivka + pivot coast.  
-  Nechať na default, neladiť — pri FOSSEN=1 ich allocator nečíta.  
-  Jediná výnimka: ak niekedy prepneš na VEC_FOSSEN=0, tieto  
-  parametre sa aktivujú a vyžadujú vlastné ladenie.  
-  
-========================================================================  
-TROUBLESHOOTING — symptóm → pravdepodobná príčina → čo kontrolovať  
-========================================================================  
-  
-"Loď sa netočí na mieste / rotácia je pomalá pri plnej páke"  
-  → YAW_CRS_RATE/THR sú nesprávne nakalibrované (najprv tieto)  
-  → ATC_STR_RAT_MAX priveľmi nízky (strop dopytu, nie kalibrácie)  
-  → VEC_YAW_EXP príliš vysoký (krivka je príliš plochá)  
-  → ATC_STR_ACC_MAX/DEC_MAX príliš nízke (rampa nestíha)  
-  
-"Po pustení páky loď dlho dobieha rotáciou"  
-  → VEC_BRK nízky → zdvihni postupne  
-  → VEC_BRK_ASYM nízky pri slabom reverze → zdvihni  
-  → Servo nedosiahne doraz: skontroluj mechanický limit serva vs  
-    MOT_VEC_ANGLEMAX=90, PWM range  
-  
-"Po uvoľnení páky sa loď prehoupne a vracia sa opačným smerom"  
-  → VEC_BRK vysoký → zníž  
-  → VEC_BRK_ASYM vysoký → zníž  
-  → ATC_STR_DEC_MAX agresívny → skontroluj rampu dopytu  
-  
-"Pri zmene smeru otáčania z +pivot na -pivot je mŕtvy interval ~0.7 s"  
-  → Toto JE pivot coast, správne chovanie (servo travel time).  
-    Ak trvá výrazne dlhšie → bug, nahlásiť ako issue.  
-    Ak sa objaví aj mimo pivot-flip → skontroluj či lock release  
-    správne detekuje fx>0.03 threshold.  
-  
-"Servo kmitá ~180° keď dopyt ide tesne okolo 90°"  
-  → Fold hysterézia je v kóde (±2°) — ak kmitá aj tak:  
-    a) VEC_RESID_TC=0 alebo extrémne malý → zdvihni  
-    b) skontroluj či dopyt naozaj netransponuje cez fold (log:  
-       _vec_folded stav ak je logovaný)  
-    c) ak kmitá pod 88° → to nie je fold, je to PID oscilácia  
-       → ATC_STR_RAT_SMAX alebo steering gainy  
-  
-"Loď sa pri plavbe dopredu správa správne, ale pri drift ju unáša  
-  a kompenzácia nezaberá"  
-  → DRIFT_G_* príliš nízke → zdvihni  
-  → DRIFT_MAXAGE vypršal (dlho od posledného merania)  
-  → LOIT_ROT_ANG/RAT bráni vzorkovaniu počas rotácie — skontroluj  
-    či loď počas drift okna nebýva rotovaná  
-  → Metóda 1 alebo 2 nie je spustená: LOIT_CST_THR príliš vysoký  
-    (PID nikdy necoastuje) alebo LOIT_I_EQERR/MIN príliš tesné  
-  
-"Brzdenie dopredného pohybu (s reversal thrust) je slabé/agresívne"  
-  → Linear surge brake používa VEC_BRK_ASYM rovnako ako rotation  
-    brake — ladiť spolu s VEC_BRK_ASYM  
-  → skontroluj throttle_norm sign vs ground_speed v logu — ak sa  
-    gate netriggeruje, skontroluj nav_mode/_pid_steering flagy  
-  
-"Po zmene dopytu z 0 na plnú rotáciu je oneskorenie"  
-  → Steering output rampa: ATC_STR_ACC_MAX (45 deg/s² je zhruba  
-    sync so servo 0.7 s) — ak príliš vysoký, dopyt predbieha servo  
-    a fold/coast môžu interagovať nepredvídateľne  
-  → PID I-term windup počas rotation-brake locku: pri ANGLEMAX=90  
-    je to pokryté limit flags, pri menšom ANGLEMAX overiť  
-  
-"Oscilácia rotácie bez akéhokoľvek zásahu brzdy"  
-  → Zlá pivot krivka: premeraj YAW_CRS_RATE/THR  
-  → VEC_YAW_EXP nesedí → zmerané TurnRate vs ThrOut z logu a fit  
-  → Slew rate serva pomalšia ako PID predpokladá → ATC_STR_ACC_MAX  
-    znížiť, alebo ATC_STR_RAT_SMAX pridať proti oscilácii  
-  
+  (steering→angle) do atan2 mapovania. OVERENÉ: allocator ho číta  
+  aj pri FOSSEN=1 — v vectored_allocate() riadi w_lowthr blend pri  
+  malom plyne (prechod direct→atan mapovanie uhla) a škáluje  
+  resid_tc. Pri FOSSEN=0 ho používa legacy cesta rovnako.  
+  Ladiť: zdvihni ak sa pri malom plyne servo správa "nervózne"  
+  (direct mapovanie trvá pridlho), zníž ak pri rozbehu pivotu  
+  uhol oneskoruje.
+
+MOT_VEC_RESID_TC [s, default 0.5]
+  Časová konštanta LPF na throttle/steering pred výberom režimu.
+  Väčšia = hlavšie prepínanie surge/pivot, ale pomalšia odozva na
+  reálnu zmenu dopytu. Meniť len ak sa pri prechodoch objaví
+  zreteľné kmítanie režimov — inak nechať default.
+
+MOT_VEC_COS_FLR [deg, default 10]
+  Pásmo okolo mechanického dorazu (90°), kde sa zapína floor proti
+  deleniu cos(δ)→0. 0 = vypnuté (nebezpečné — blowup pri δ→90°).
+  Prakticky nemenit; zmeniť len ak ANGLEMAX nie je 90 (vtedy by
+  floor nesedel s mechanikou — ale allocator aj tak vyžaduje 90).
+
+MOT_VEC_BLD_STRT [deg, default 70]
+  Uhol serva, od ktorého sa začína blend medzi geometrickou surge
+  krivkou a pivot krivkou (t_vector ↔ t_pivot). Pod týmto uhlom
+  platí čistá surge geometria. Nastaviť podľa mechaniky — kde sa
+  thruster prestane správať ako "kormidlo+skrutka vpredu" a začína
+  čistý vektorový prípad.
+
+  SKRYTÉ STAVY KTORÉ NETREBA LADIŤ (automatické):
+  - pivot-to-pivot coast: 0.7 s vynúteného nulového plynu po uvoľnení
+    rotation-brake locku, kým servo prechádza stredom. Nie je
+    parameter — hardcoded 700 ms. Ak sa prejaví ako "mŕtvy plyn"
+    po pivot zmene smeru → je to táto funkcia, nie bug.
+  - fold hysterézia ±2° okolo 90° — zamedzuje kmítaniu servo pri
+    dopyte tesne za hranicou. Hardcoded, neladiť.
+
+------------------------------------------------------------------------
+FÁZA 5 — drift kompenzácia (Loiter/Nav feed-forward)
+------------------------------------------------------------------------
+Zásada: najprv naladiť allocator (fázy 1-4), až potom drift FF —
+inak kompenzuješ chyby ladenia, nie skutočný drift.
+
+MOT_DRIFT_G_LOIT / MOT_DRIFT_G_NAV [0-2, default 1.0]
+  Gain aplikovaný na odhad driftu pri zápise (write-time). >1 =
+  agresívnejšia kompenzácia. Ak loď v Loiter stále unáša → zdvihni
+  postupne; ak sa správa "hyperkorektne" (prekompenzuje, osciluje
+  okolo hold pozície) → zníž. Ladí sa na vode za reálneho vetra/
+  prúdenia, nie v bazéne.
+
+MOT_DRIFT_MAXAGE [s, default 1800]
+  Ako dlho starý odhad ešte platí. Príliš dlhé = loď kompenzuje
+  včerajší vietor. Krátke = po každom manévri stratí pamäť.
+  0 = nikdy neveriť odhadu (prakticky vypína funkciu).
+
+LOIT_DRF_MIN [m/s, default 0.03]
+  Prahou aktivácie drift kompenzácie v Loiter — pod týmto odhadom
+  sa nepovažuje za drift (chráni proti GPS šumu).
+
+LOIT_CST_THR [%, default 1.0]
+  Throttle pod ktorým sa loď považuje za "coasting" — okno na
+  meranie driftu metódou 1. Ak je speed PID pri držaní pozície
+  neustále nad týmto, metóda 1 nikdy nevzoriekuje.
+
+LOIT_I_EQERR [m/s, default 0.10]
+  Chyba speed-PID, pod ktorou sa I-term považuje za drift
+  equilibrium — vstupná podmienka metódy 2.
+
+LOIT_I_MIN [0-0.5, default 0.02]
+  Minimálny I-term akceptovaný ako drift sample.
+
+LOIT_I_ALPHA [0.01-1.0, default 0.10]
+  EMA váha nového sample. Menšia = pomalšia, stabilnejšia krivka;
+  väčšia = rýchlejšia, hlučnejšia. Pri jednorazovom ladení nechať.
+
+LOIT_I_DISAG [0.1-2.0, default 0.5]
+  Ak nový odhad nesúhlasí s uloženým o viac než tento zlomok,
+  blenduje sa len 25 % — ochrana proti výskokom.
+
+LOIT_ROT_ANG [deg, default 15, 0=vypnuté]
+  Servo deflection nad ktorou sa blok coast vzorkovanie —
+  rotácia loďou generuje falošnú laterálnu rýchlosť na IMU.
+
+LOIT_ROT_RAT [deg/s, default 20, 0=vypnuté]
+  Yaw rate gate pre coast sampling. 45 deg/s ≈ 0.5 m/s falošný
+  drift — drž pod reálnym driftom.
+
+DRIFT_EST_YR [deg/s, default 15]
+  Sprísnený yaw rate gate pre nav/G guided drift estimator.
+  Musí byť < LOIT_ROT_RAT (estimator potrebuje čistšie okná).
+
+VZÁJOMNÉ VZŤAHY drift parametrov:
+- LOIT_ROT_RAT > DRIFT_EST_YR vždy (estimator je konzervatívnejší)
+- LOIT_CST_THR a I_EQERR definujú *kedy* sa meria — ak sú tesné,
+  metódy nikdy nevzorkujú a DRIFT_G_* nemajú čo škálovať
+- DRIFT_MAXAGE chráni celý subsystém — ak je 0, všetko ostatné
+  je mŕtve nezávisle od ostatných hodnôt
+
+------------------------------------------------------------------------
+LEGACY PARAMETRE — aktívne len pri VEC_FOSSEN=0
+------------------------------------------------------------------------
+SFL_DB / SFL_GAIN / SFL_MAX / SFL_PIVOT / SFL_IFRZ
+  Steering-floor systém (pre-Fossen zaplata). Pri allocatori
+  zamietnuté — jeho funkciu prevzal t_pivot krivka + pivot coast.
+  Nechať na default, neladiť — pri FOSSEN=1 ich allocator nečíta.
+  Jediná výnimka: ak niekedy prepneš na VEC_FOSSEN=0, tieto
+  parametre sa aktivujú a vyžadujú vlastné ladenie.
+
+========================================================================
+TROUBLESHOOTING — symptóm → pravdepodobná príčina → čo kontrolovať
+========================================================================
+
+"Loď sa netočí na mieste / rotácia je pomalá pri plnej páke"
+  → YAW_CRS_RATE/THR sú nesprávne nakalibrované (najprv tieto)
+  → ATC_STR_RAT_MAX priveľmi nízky (strop dopytu, nie kalibrácie)
+  → VEC_YAW_EXP príliš vysoký (krivka je príliš plochá)
+  → ATC_STR_ACC_MAX/DEC_MAX príliš nízke (rampa nestíha)
+
+"Po pustení páky loď dlho dobieha rotáciou"
+  → VEC_BRK nízky → zdvihni postupne
+  → VEC_BRK_ASYM nízky pri slabom reverze → zdvihni
+  → Servo nedosiahne doraz: skontroluj mechanický limit serva vs
+    MOT_VEC_ANGLEMAX=90, PWM range
+
+"Po uvoľnení páky sa loď prehoupne a vracia sa opačným smerom"
+  → VEC_BRK vysoký → zníž
+  → VEC_BRK_ASYM vysoký → zníž
+  → ATC_STR_DEC_MAX agresívny → skontroluj rampu dopytu
+
+"Pri zmene smeru otáčania z +pivot na -pivot je mŕtvy interval ~0.7 s"
+  → Toto JE pivot coast, správne chovanie (servo travel time).
+    Ak trvá výrazne dlhšie → bug, nahlásiť ako issue.
+    Ak sa objaví aj mimo pivot-flip → skontroluj či lock release
+    správne detekuje fx>0.03 threshold.
+
+"Servo kmitá ~180° keď dopyt ide tesne okolo 90°"
+  → Fold hysterézia je v kóde (±2°) — ak kmitá aj tak:
+    a) VEC_RESID_TC=0 alebo extrémne malý → zdvihni
+    b) skontroluj či dopyt naozaj netransponuje cez fold (log:
+       _vec_folded stav ak je logovaný)
+    c) ak kmitá pod 88° → to nie je fold, je to PID oscilácia
+       → ATC_STR_RAT_SMAX alebo steering gainy
+
+"Loď sa pri plavbe dopredu správa správne, ale pri drift ju unáša
+  a kompenzácia nezaberá"
+  → DRIFT_G_* príliš nízke → zdvihni
+  → DRIFT_MAXAGE vypršal (dlho od posledného merania)
+  → LOIT_ROT_ANG/RAT bráni vzorkovaniu počas rotácie — skontroluj
+    či loď počas drift okna nebýva rotovaná
+  → Metóda 1 alebo 2 nie je spustená: LOIT_CST_THR príliš vysoký
+    (PID nikdy necoastuje) alebo LOIT_I_EQERR/MIN príliš tesné
+
+"Brzdenie dopredného pohybu (s reversal thrust) je slabé/agresívne"
+  → Linear surge brake používa VEC_BRK_ASYM rovnako ako rotation
+    brake — ladiť spolu s VEC_BRK_ASYM
+  → skontroluj throttle_norm sign vs ground_speed v logu — ak sa
+    gate netriggeruje, skontroluj nav_mode/_pid_steering flagy
+
+"Po zmene dopytu z 0 na plnú rotáciu je oneskorenie"
+  → Steering output rampa: ATC_STR_ACC_MAX (45 deg/s² je zhruba
+    sync so servo 0.7 s) — ak príliš vysoký, dopyt predbieha servo
+    a fold/coast môžu interagovať nepredvídateľne
+  → PID I-term windup počas rotation-brake locku: pri ANGLEMAX=90
+    je to pokryté limit flags, pri menšom ANGLEMAX overiť
+
+"Oscilácia rotácie bez akéhokoľvek zásahu brzdy"
+  → Zlá pivot krivka: premeraj YAW_CRS_RATE/THR
+  → VEC_YAW_EXP nesedí → zmerané TurnRate vs ThrOut z logu a fit
+  → Slew rate serva pomalšia ako PID predpokladá → ATC_STR_ACC_MAX
+    znížiť, alebo ATC_STR_RAT_SMAX pridať proti oscilácii
+
 "Throttle je mŕtvy dlhšie než ~1 s po akomkoľvek manévri"  
-  → Podozrenie na pivot coast stuck: _vec_pivot_coast_ms sa nezrelý  
-    ak |fx| nikdy >0.03 a lock nikdy na tej istej strane → bug report.  
-    Prakticky skontrolovať či neskôr prechod na forward dopyt  
-    throttle uvoľní — ak áno, je to štartovací stav, nie deadlock.  
-  
-========================================================================  
-CHECKLIST pred prvým water testom po ladení  
-========================================================================  
-[ ] MOT_VEC_FOSSEN = 1, MOT_VEC_ANGLEMAX = 90  
-[ ] YAW_CRS_RATE = nameraný plateau rate v Acro, nie teoretický  
-[ ] YAW_CRS_THR = nameraný throttle% pri tom plateaue, nie default  
-[ ] VEC_BRK doladený kruhovým manévrom (min. dobeh, žiadna oscilácia)  
-[ ] ATC_STR_ACC_MAX = ATC_STR_DEC_MAX = 45 (nie 0.12!)  
-[ ] DRIFT_* parametre — zatiaľ default, ladiť až po allocatori  
-[ ] Log nastavený na steering desired/achieved + motor out pre  
-    spätnú analýzu  
+  → Pivot coast trvá max 700 ms od uvoľnenia locku a potom sa  
+    vždy sám ukončí — stuck nie je možný. Ak trvá dlhšie:  
+    a) VEC_DEADBAND príliš vysoký → vec_mag pod prahom drží  
+       throttle na 0 cez w_db blend (zniz deadband)  
+    b) lock sa cyklicky re-aktivuje (throttle jde cez VEC_BRK  
+       vetvu, nie pivot) → skontroluj VEC_BRK ladenie  
+    c) vyššie vrstvy: motor limit flags, disarm, failsafe
+
+========================================================================
+CHECKLIST pred prvým water testom po ladení
+========================================================================
+[ ] MOT_VEC_FOSSEN = 1, MOT_VEC_ANGLEMAX = 90
+[ ] YAW_CRS_RATE = nameraný plateau rate v Acro, nie teoretický
+[ ] YAW_CRS_THR = nameraný throttle% pri tom plateaue, nie default
+[ ] VEC_BRK doladený kruhovým manévrom (min. dobeh, žiadna oscilácia)
+[ ] ATC_STR_ACC_MAX = ATC_STR_DEC_MAX = 45 (nie 0.12!)
+[ ] DRIFT_* parametre — zatiaľ default, ladiť až po allocatori
+[ ] Log nastavený na steering desired/achieved + motor out pre
+    spätnú analýzu
