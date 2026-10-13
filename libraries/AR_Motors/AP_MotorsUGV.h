@@ -159,6 +159,10 @@ public:
     // code can compute its own age-based handoff weighting
     float get_drift_max_age_s() const { return _drift_max_age_s; }
 
+    // true when the unified allocator (VEC_ALLOC=1) handles vectored thrust;
+    // mode-level legacy patches (e.g. steering floor) must not run on top of it
+    bool use_vec_alloc() const { return _vec_alloc != 0; }
+
     // output to motors and steering servos
     // ground_speed should be the vehicle's speed over the surface in m/s
     // dt should be expected time between calls to this function
