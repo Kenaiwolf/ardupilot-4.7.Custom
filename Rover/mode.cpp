@@ -340,9 +340,15 @@ void Mode::calc_throttle(float target_speed, bool avoidance_enabled)
     }
 #endif  // AP_AVOIDANCE_ENABLED
 
-    // compute freshness-gated heading error BEFORE the PID calls so the I-term
-    // can be frozen directly via the motor_limit parameters (not via
-    // g2.motors.limit, which is cleared in output() before reaching the PID)
+    // compute freshness-gated heading error BEFORE the PID calls so the
+    // THROTTLE/speed PID I-term can be frozen directly via the motor_limit
+    // parameters (not via g2.motors.limit, which is cleared in output()
+    // before reaching the PID). freezes the throttle integrator below
+    // (get_throttle_out_stop / get_throttle_out_speed), NOT the steering
+    // I-term — the steering-rate PID has its own anti-windup via
+    // limit.steer_left/right in vectored_allocate(). steering I wind-up
+    // protection comes from the steering PID path; this freeze exists
+    // because during a pivot fx~0 would otherwise wind the speed I-term
     bool steer_i_freeze = false;
     float yaw_error_rad = 0.0f;
     float yaw_error_deg = 0.0f;
