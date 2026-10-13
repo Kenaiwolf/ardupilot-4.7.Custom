@@ -1366,7 +1366,7 @@ void AP_MotorsUGV::output_regular(bool armed, float ground_speed, float steering
             // vectored thrust handling
             if (have_vectored_thrust()) {
                 if (_vec_fossen > 0) {
-                    // unified allocator path (VEC_FOSSEN=1): identical math lives in vectored_allocate()
+                    // unified allocator path (VEC_FOSSEN=1): mapping lives in vectored_allocate() — math differs from the legacy blend below (fold hysteresis, cos-floor, blend curve, brakes)
                     vectored_allocate(throttle * 0.01f, steering * (1.0f/4500.0f), ground_speed,
                                       _nav_context, steering, throttle, dt);
                 } else {
