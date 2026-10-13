@@ -423,10 +423,10 @@ void Mode::calc_throttle(float target_speed, bool avoidance_enabled)
         }
     }
 
-     // legacy path only: with VEC_ALLOC=1 the allocator's t_pivot/vec_mag logic
+    // legacy path only: with VEC_FOSSEN=1 the allocator's t_pivot/vec_mag logic
     // already supplies pivot thrust; stacking this floor on top adds an
     // unwanted forward bias (see SFL semantics discussion)
-    if (g2.motors.have_vectored_thrust() && !g2.motors.use_vec_alloc() && steering_heading_fresh) {
+    if (g2.motors.have_vectored_thrust() && !g2.motors.use_vec_fossen() && steering_heading_fresh) {
         // 2. Steering Thrust Floor: force minimum throttle to allow rotation
         // Disabled when VEC_FOSSEN=1: the Fossen allocator supplies its own
         // throttle floor via the (Fx,N)->T magnitude, this legacy floor would
