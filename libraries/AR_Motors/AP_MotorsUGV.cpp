@@ -657,6 +657,15 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             (n * yaw_rate_rads) < 0.01f;
 
         if (!_vec_rot_brake_active && rot_brake_trigger) {
+            // re-lock on the SAME side as the previous lock proves the earlier
+            // release was premature (servo never crossed center) - end the
+            // transit suppression instantly so the brake can work. a re-lock
+            // on the OPPOSITE side does NOT clear it: the servo still needs
+            // the full ~0.7s transit window from the original release.
+            if (_vec_pivot_coast_ms != 0 &&
+                is_positive(steering_angle_rad) == is_positive(_vec_rot_brake_angle_rad)) {
+                _vec_pivot_coast_ms = 0;
+            }
             _vec_rot_brake_active = true;
             _vec_rot_brake_angle_rad = steering_angle_rad;
         } else if (_vec_rot_brake_active &&
@@ -672,6 +681,13 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             // real fx demand reappearing means the PID needs the angle back
             // immediately, and lock-release delay is the larger risk here
             _vec_rot_brake_active = false;
+            // start the servo-transit suppression window only on a
+            // yaw-agreement release with no forward demand - the servo is
+            // about to traverse +-90deg through center and any thrust during
+            // that sweep lands partly forward
+            if (fabsf(fx) <= 0.03f) {
+                _vec_pivot_coast_ms = AP_HAL::millis();
+            }
         }
 
         if (_vec_rot_brake_active) {
@@ -679,6 +695,22 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             const float brake_scale = _vec_brk_pct * 0.01f;
             const float brake_frac = fabsf(n) * brake_scale;
             throttle_norm = copysignf(brake_frac * brk_asym, n);
+        }
+
+        // servo-transit suppression: for 0.7s after a yaw-agreement brake
+        // release, force throttle to zero - the servo is still sweeping to
+        // the opposite stop and any thrust through intermediate angles lands
+        // partly forward, contaminating the pivot. placed AFTER the brake
+        // block so an opposite-side re-lock inside the window is also held
+        // at zero. cleared early only by a real fx demand (pivot over) or a
+        // same-side re-lock (handled in the trigger branch above)
+        if (_vec_pivot_coast_ms != 0) {
+            if (fabsf(fx) > 0.03f ||
+                (AP_HAL::millis() - _vec_pivot_coast_ms) >= 700) {
+                _vec_pivot_coast_ms = 0;
+            } else {
+                throttle_norm = 0.0f;
+            }
         }
 
         // deadband S-curve blend: fade smoothly from the frozen hold-state
