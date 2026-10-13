@@ -531,9 +531,23 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
 
         // fold demands pointing aft into the +/-90 deg envelope with negative
         // thrust (reverse). reverse reachable only via this fold: fx<0 while
-        // moving = braking, and the nav_mode gate above zeroes it at rest
-        if (fabsf(delta) > M_PI_2) {
+        // moving = braking, and the nav_mode gate above zeroes it at rest.
+        // hysteresis on the fold boundary: without it, a demand hovering at
+        // ~90deg jitters delta between +89.9/-89.9, which swings the servo
+        // ~180deg and flips throttle sign every tick. fold in only past
+        // 90+2deg, fold out only below 90-2deg; a pure geometric boundary,
+        // so unlike the rotation brake the hysteresis cannot delay a real
+        // response - worst-case angle quantization error is 2deg, and it is
+        // the only protection here when VEC_RESID_TC=0 (no input filtering)
+        const float fold_eps_rad = radians(2.0f);
+        if (_vec_folded) {
             delta = is_positive(delta) ? (delta - M_PI) : (delta + M_PI);
+            if (fabsf(delta) < M_PI_2 - fold_eps_rad) {
+                _vec_folded = false;
+            }
+        } else if (fabsf(delta) > M_PI_2 + fold_eps_rad) {
+            delta = is_positive(delta) ? (delta - M_PI) : (delta + M_PI);
+            _vec_folded = true;
         }
         const float atan_angle_rad = constrain_float(delta, -vector_angle_max_rad, vector_angle_max_rad);
 
@@ -661,7 +675,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             // release was premature (servo never crossed center) - end the
             // transit suppression instantly so the brake can work. a re-lock
             // on the OPPOSITE side does NOT clear it: the servo still needs
-            // the full ~0.7s transit window from the original release.
+            // the full ~0.8s transit window from the original release.
             if (_vec_pivot_coast_ms != 0 &&
                 is_positive(steering_angle_rad) == is_positive(_vec_rot_brake_angle_rad)) {
                 _vec_pivot_coast_ms = 0;
@@ -697,7 +711,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             throttle_norm = copysignf(brake_frac * brk_asym, n);
         }
 
-        // servo-transit suppression: for 0.7s after a yaw-agreement brake
+        // servo-transit suppression: for 0.8s after a yaw-agreement brake
         // release, force throttle to zero - the servo is still sweeping to
         // the opposite stop and any thrust through intermediate angles lands
         // partly forward, contaminating the pivot. placed AFTER the brake
@@ -706,7 +720,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // same-side re-lock (handled in the trigger branch above)
         if (_vec_pivot_coast_ms != 0) {
             if (fabsf(fx) > 0.03f ||
-                (AP_HAL::millis() - _vec_pivot_coast_ms) >= 700) {
+                (AP_HAL::millis() - _vec_pivot_coast_ms) >= 800) {
                 _vec_pivot_coast_ms = 0;
             } else {
                 throttle_norm = 0.0f;
