@@ -438,9 +438,9 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | `LOIT_COAST_THR` | AP_MotorsUGV | 1 % | coast gate (method 1) |
 | `LOIT_I_EQERR`/`I_MIN`/`I_ALPHA`/`I_DISAG` | AP_MotorsUGV | 0.10/0.02/0.10/0.5 | method-2 window, noise floor, EMA, disagreement |
 | `LOIT_ROT_ANG`/`LOIT_ROT_RATE` | AP_MotorsUGV | 15°/20 °/s | rotation gate (method 1); 0 = off |
-| `VEC_FOSSEN` | AP_MotorsUGV | 0 | renamed from `VEC_FOSSEN` 2026-10-11 (same index 39); 0=stock blend + legacy SFL floor/cosine reduction stay active; 1=Fossen-style unified allocator (`vectored_allocate()`), mutually exclusive with SFL floor/cosine reduction (auto-disabled to avoid double compensation). Requires `MOT_VEC_ANGLEMAX=90` |
+| `VEC_FOSSEN` | AP_MotorsUGV | 0 | renamed from `VEC_ALLOC` 2026-10-11 (same index 39); 0=stock blend + legacy SFL floor/cosine reduction stay active; 1=Fossen-style unified allocator (`vectored_allocate()`), mutually exclusive with SFL floor/cosine reduction (auto-disabled to avoid double compensation). Requires `MOT_VEC_ANGLEMAX=90` |
 | `SFL_PIVOT` | AP_MotorsUGV | 0.0 % | minimum floor throttle while heading error exceeds `SFL_IFRZ`; 0 disables. Semantic note: intended as full-throttle pivot capability, not scaled off `SFL_MAX` — see §11 open design question |
-| `VEC_BRK` | AP_MotorsUGV | 100 % | rotation-brake reverse thrust scale; 100 = nominal (|yaw rate|/16 deg/s derated by reverse efficiency 0.8), 0 disables the brake; only active when servo at full deflection and PID demands opposite rotation |
+| `VEC_BRK` | AP_MotorsUGV | 100 % | rotation-brake reverse thrust scale; 100 = nominal (brake magnitude = |n| x this scale, further multiplied by `VEC_BRK_ASYM`), 0 disables the brake; only active when servo at full deflection and PID demands opposite rotation |
 | `VEC_YAW_EXP` | AP_MotorsUGV | 1.67 | inverse exponent linearizing yaw-dominant throttle demand (`TurnRate_frac = ThrOut_frac^n` fit from logs); 1.0 = no linearization |
 | `VEC_BRK_ASYM` | AP_MotorsUGV | 1.24 | multiplier on counter-thrust (braking) demand, rotation-brake and linear surge braking alike, compensating reverse thrust being less efficient than forward; 1.0 = symmetric/off |
 | `VEC_COS_FLR` | AP_MotorsUGV | 10.0 deg | angular margin from mechanical 90° stop where the cos(δ) magnitude floor engages, preventing blow-up near the singularity; 0 = legacy 1e-3 hard threshold |
@@ -458,7 +458,7 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 - **Units discipline:** speeds m/s, headings centi-degrees, throttle 0–100 % at `calc_throttle` level vs −1..+1 inside `AR_AttitudeControl`, drift estimates always earth-frame NE.
 - **Normalized steering contract:** §3.3 + §4.6 are both committed — `get_steering_out_rate` returns ±1 and `_steering` is always ±4500 centidegrees.
 
-## 11. Known-open items (deliberate)
+## 11. Known-open items
 
 | Item | Status |
 |---|---|
@@ -470,13 +470,13 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | Yaw rate cap during pivot | at δ=90°, T=100% the turn-rate loop has no lever left — rate is set by hull drag/G only; verify water test shows acceptable peak deg/s |
 | Reverse-gate definition | stern travel = sustained T<0 with |v|<eps AND |δ|<eps. T<0 opposing v or ω is braking — always legal |
 | Stale `VEC_BRK` `@Description` comment (AP_MotorsUGV.cpp:308) | comment referenced a `|yaw rate|/16deg/s` + `0.8` formula from an earlier version of the brake; current code uses `|n| * VEC_BRK * VEC_BRK_ASYM` only — comment corrected, this item is now resolved, not open |
-`stop_vehicle` bypasses `Mode::set_steering` | partially fixed (commit f6d3e4d3) — stop_vehicle() now calls set_nav_context(true) and set_pid_steering(true) directly before g2.motors.set_steering() (`mode.cpp:496-498`), deliberately still bypassing Mode::set_steering() itself (stick-mixing/slew handling is irrelevant/unsafe mid-stop). set_yaw_rate_max_rads() is still NOT asserted here — open question: does vectored_allocate()'s brake/residual logic depend on the yaw-rate-max value during a stop? If yes, add the third call; if the value is irrelevant while stopping, downgrade this row to resolved.
+`stop_vehicle` bypasses `Mode::set_steering` | resolved (commits f6d3e4d3, a1bd7a7c) — stop_vehicle() now asserts all three flags before g2.motors.set_steering(): set_nav_context(true), set_pid_steering(true), and set_yaw_rate_max_rads(radians(get_steer_rate_max_degs())) (`mode.cpp:496-498`), deliberately still bypassing Mode::set_steering() itself (its stick-mixing re-read and slew/wrap handling are irrelevant/unsafe mid-stop). No open question remains |
 Counter-rotation gap | target behind vehicle, PID has not yet flipped sign of n — brake does not engage; left open, to be addressed via ATC_STR_DEC_MAX/ATC_STR_ACC_MAX tuning, not new code |
 | Hull jerk at rotation→brake transition | throttle can step +100→-80→+60; no direct param today — tune ATC_STR_DEC_MAX up as primary damping (brake should be a backstop, not the main tool); if still jerky, temporarily lower MOT_VEC_BRK to 50-70% and accept more overshoot |
 | Fold-boundary chatter hysteresis | conditionally open — only needed if VEC_RESID_TC filtering proves insufficient; not yet implemented |
 
 ### Open design questions
-- Authority(v,δ) normalization — PID outputs reinterpreted as acceleration/moment demands; allocator would divide by measured authority(v,δ) curve, one gain set valid across speed range. Applies to both yaw and surge axes; reverse uses separate curve (decel/accel ≈ 0.8). Speed-dependent gain in `vectored_allocate` — not yet implemented, needs one new variable (not a new control loop).
+Authority(v,δ) normalization — PID outputs reinterpreted as acceleration/moment demands; allocator would divide by measured authority(v,δ) curve, one gain set valid across speed range. Applies to both yaw and surge axes; reverse-thrust asymmetry is already handled separately via `VEC_BRK_ASYM` (not a hardcoded 0.8 — that value no longer exists in code). Speed-dependent gain in `vectored_allocate` — not yet implemented, needs one new variable (not a new control loop).
 - Accel/decel ratio for a future translational brake (fx<0) — rotation brake is implemented (`vectored_allocate`'s braking-demand asymmetry block); `VEC_BRK_ASYM` applies identically to both rotation-brake and linear surge braking per the code comment, so this specific item may already be resolved. Needs water-test verification, not new code.
 
 ---
