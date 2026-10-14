@@ -330,7 +330,7 @@ Uses `get_yaw_rate_earth()` (earth-frame) so wave-induced roll/pitch rates don't
 
 ### 5.3 Method 2 — equilibrium I-term inference
 
-When the loiter is in steady state (position error small, throttle stable), the speed-PID I-term is a direct measure of the thrust holding position against drift:
+When the loiter is in steady state — boat stationary (|v| ≤ stop_speed) or sliding slowly outward (|v| ≤ 2·stop_speed with distance-to-target rising for `LOITER_DRIFT_RISING_TICKS` ticks) — the speed-PID I-term is a direct measure of the thrust holding position against drift. The old position-error gate (`|error| ≤ LOIT_I_EQERR`) was removed: under strong drift the PID holds a steady-state error larger than the gate, which closed the window exactly when the measurement mattered — a self-sealing blind spot. Servo transit (`VEC_TRN_MS` window) and active rotation are both excluded from sampling:
 
 ```cpp
 // assumes bow-pull thruster convention: thrust dir = yaw + steer angle.
@@ -355,7 +355,7 @@ const float drift_mag_mps = MIN(cruise_speed * powf((_drift_i_filt + ff_frac) / 
 
 > **Depends on §4.6 fix (now committed):** the `/4500` normalization assumes `_steering ∈ ±4500`. Since §4.6 is fixed, this estimator reliably receives correctly clamped values even when the heading PID saturates.
 
-Tunables: `LOIT_I_EQERR` (throttle-stability window 0.10), `LOIT_I_MIN` (noise floor 0.02), `LOIT_I_ALPHA` (EMA 0.10), `LOIT_I_DISAG` (method-1/method-2 disagreement handling 0.5). The inverse `powf(…, 1/expo)` maps I-term-fraction → equivalent speed using the same `ATC_SPD_EXPO` curve as the forward direction.
+Tunables: `LOIT_I_MIN` (noise floor 0.02), `LOIT_I_ALPHA` (EMA 0.10), `LOIT_I_DISAG` (method-1/method-2 disagreement handling 0.5). `LOIT_I_EQERR` is **deprecated** — still registered for EEPROM compatibility but no longer read; method-2 gating is stationary/sliding-based.
 
 ### 5.4 Seeding on loiter entry
 
@@ -437,7 +437,8 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | `SFL_DB`/`SFL_GAIN`/`SFL_MAX`/`SFL_IFRZ` | AP_MotorsUGV | 10°/0.7/20%/45° | steering floor + I-freeze |
 | `LOIT_DRIFT_MIN` | AP_MotorsUGV | 0.03 m/s | anti-drift heading activation |
 | `LOIT_COAST_THR` | AP_MotorsUGV | 1 % | coast gate (method 1) |
-| `LOIT_I_EQERR`/`I_MIN`/`I_ALPHA`/`I_DISAG` | AP_MotorsUGV | 0.10/0.02/0.10/0.5 | method-2 window, noise floor, EMA, disagreement |
+| `LOIT_I_EQERR` | AP_MotorsUGV | 0.10 | **deprecated** — registered but unread; method-2 gate is stationary/sliding, not error-based |
+| `LOIT_I_MIN`/`I_ALPHA`/`I_DISAG` | AP_MotorsUGV | 0.02/0.10/0.5 | method-2 noise floor, EMA, disagreement |
 | `LOIT_ROT_ANG`/`LOIT_ROT_RATE` | AP_MotorsUGV | 15°/20 °/s | rotation gate (method 1); 0 = off |
 | `VEC_FOSSEN` | AP_MotorsUGV | 0 | renamed from `VEC_ALLOC` 2026-10-11 (same index 39); 0=stock blend + legacy SFL floor/cosine reduction stay active; 1=Fossen-style unified allocator (`vectored_allocate()`), mutually exclusive with SFL floor/cosine reduction (auto-disabled to avoid double compensation). Requires `MOT_VEC_ANGLEMAX=90` |
 | `SFL_PIVOT` | AP_MotorsUGV | 0.0 % | minimum floor throttle while heading error exceeds `SFL_IFRZ`; 0 disables. Semantic note: intended as full-throttle pivot capability, not scaled off `SFL_MAX` — see §11 open design question |
@@ -475,7 +476,8 @@ This section documents decisions made during the vectored-thrust allocator rewor
 | `stop_vehicle` flag bypass | resolved (`f6d3e4d3`, `a1bd7a7c`) — asserts `set_nav_context` and `set_pid_steering` before `set_steering`; `Mode::set_steering` bypass is deliberate. `set_yaw_rate_max_rads` later removed entirely — it was write-only, no consumer in `vectored_allocate` (commit `36a5afb0`/`5218c988`) |
 | SFL/steering-floor duplication | SFL gated to legacy path only — `use_vec_fossen()` must be false for the floor to apply (`mode.cpp:429`); allocator covers pivot authority via `t_pivot`, SFL was a pre-allocator patch, not a foundation — commits `41a022a2`, `c36969ff` (param name fix `use_vec_alloc` → `use_vec_fossen`) |
 | Pivot-to-pivot transit (coast) | `throttle_norm = 0` for `VEC_TRN_MS` (default 800 ms), started by a yaw-agreement lock release OR a demanded-side flip from saturation (|n|>0.05, |fx|<=0.03, sign flip vs `_vec_last_steering_angle_rad`, not while brake-locked) — covers full servo transit so no thrust lands through intermediate angles; the window restarts on any additional side flip inside it (return transit needs the same time); early exit on `\|fx\| > 0.03`; re-lock on SAME side cancels instantly; opposite-side re-lock does NOT shorten the window — commit `72a193b4` + param + flip-trigger update |
-| Fold-boundary chatter | hysteresis implemented — `fold-in` at `\|delta\| > 90°+2°`, `fold-out` at `\|delta\| < 90°-2°`, single `_vec_folded` bool; protects `VEC_RESID_TC=0` or very small TC — commit `dfa31ace` |
+| Fold-boundary chatter | hysteresis implemented — `fold-in` at `\|delta\| > 90°+2°`, `fold-out` at `\|delta\| < 90°-2°`, single `_vec_folded` bool; protects `VEC_RESID_TC`=0 or very small TC — commit `dfa31ace` |
+| Method-2 estimator blind spot | error gate removed — replaced by stationary (`\|v\| ≤ stop_speed`) / sliding (`\|v\| ≤ 2·stop_speed`, distance rising `LOITER_DRIFT_RISING_TICKS` ticks) windows + `!rotating` + `!in_transit` gates; sliding with no measurable direction skips the write instead of thrust-vector fallback (would give the opposite direction); zero-branch gated by `!sliding` so low-I sliding doesn't corrode the estimate; `LOIT_I_EQERR` deprecated |
 | `VEC_BRK` `@Description` comment | corrected — current code uses `\|n\| * VEC_BRK * VEC_BRK_ASYM`; old `\|yaw rate\|/16deg/s + 0.8` formula no longer exists |
 | Speed-PID I-freeze hold-vs-decay | reviewed — current hold-or-decay is **correct**, see §4.4 |
 
