@@ -10,6 +10,10 @@ Predpoklady pred ladením (skontrolovať, neladiť):
 - ATC_STR_RAT_MAX  = reálny strop požadovaného turn-rate [deg/s]
 - ATC_STR_ACC_MAX = ATC_STR_DEC_MAX = 45  [deg/s²]  (rampa dopytu;
   cca zodpovedá dobe presunu serva +90/-90 ~0.8 s)
+- MOT_VEC_TRN_MS = nameraný čas plný-doraz → plný-doraz serva [ms]
+  (default 800; coast okno kryje servo transit pri zmene smeru
+  pivotu — príliš krátke = kontaminácia dopredným ťahom, príliš
+  dlhé = zbytočný mŕtvy plyn)
 - ATC_TURN_MAX_G ponechať default — pri pivote (v=0) je automaticky
   neaktívny, pri plavbe chráni pred príliš ostrým zákrutom
 - MOT_SLEWRATE = 100 (alebo podľa ESC); je to slew limit PLYNU,
@@ -148,11 +152,23 @@ MOT_VEC_BLD_STRT [deg, default 70]
   thruster prestane správať ako "kormidlo+skrutka vpredu" a začína
   čistý vektorový prípad.
 
-  SKRYTÉ STAVY KTORÉ NETREBA LADIŤ (automatické):
-  - pivot-to-pivot coast: 0.8 s vynúteného nulového plynu po uvoľnení
-    rotation-brake locku, kým servo prechádza stredom. Nie je
-    parameter — hardcoded 800 ms. Ak sa prejaví ako "mŕtvy plyn"
-    po pivot zmene smeru → je to táto funkcia, nie bug.
+  SKRYTÉ STAVY (automatické, okno je parameter):
+  - pivot-to-pivot coast: MOT_VEC_TRN_MS (default 800 ms) vynúteného
+    nulového plynu. Spúšťa sa dvoma cestami: (a) po uvoľnení
+    rotation-brake locku pri súhlase yaw s dopytom, (b) okamžite pri
+    flipu dopytu na opačnú stranu, ak bol predošlý uhol v doraze —
+    kým servo prechádza cez stred. Okno sa REŠTARTUJE pri každom
+    ďalšom flipe strany počas behu (návratový transit trvá rovnako
+    ako cesta tam). Ukončenie: fx > 3 % dopyt, uplynutie
+    VEC_TRN_MS, alebo re-lock na PÔVODNÚ stranu (re-lock na opačnú
+    stranu okno NEskracuje — servo práve tranzituje). VEC_TRN_MS = 0
+    vypína supresiu úplne. Nastaviť z nameraného času plný-doraz →
+    plný-doraz serva. Ak sa prejaví ako "mŕtvy plyn" po pivot zmene
+    smeru → je to táto funkcia, nie bug.
+  - rotation-brake debounce: lock sa aktivuje až po 3 po sebe idúcich
+    tickoch (~60 ms) so skutočnou opozičnou rotáciou (|yaw_rate| >
+    0.5 deg/s proti smeru n). Pivot z kľudu brake NESPÚŠŤA — servo
+    doraz k pivotu dosiahne skôr, než sa trup roztočí.
   - fold hysterézia ±2° okolo 90° — zamedzuje kmítaniu servo pri
     dopyte tesne za hranicou. Hardcoded, neladiť.
 
@@ -249,10 +265,12 @@ TROUBLESHOOTING — symptóm → pravdepodobná príčina → čo kontrolovať
   → ATC_STR_DEC_MAX agresívny → skontroluj rampu dopytu
 
 "Pri zmene smeru otáčania z +pivot na -pivot je mŕtvy interval ~0.8 s"
-  → Toto JE pivot coast, správne chovanie (servo travel time).
-    Ak trvá výrazne dlhšie → bug, nahlásiť ako issue.
+  → Toto JE pivot coast, správne chovanie (servo travel time,
+    MOT_VEC_TRN_MS). Ak trvá výrazne dlhšie → bug, nahlásiť ako issue.
     Ak sa objaví aj mimo pivot-flip → skontroluj či lock release
     správne detekuje fx>0.03 threshold.
+  → Každý ďalší flip strany počas okna ho reštartuje — pri rýchlom
+    flip-flop dopyte sa okno príslušne predlžuje (zámer).
 
 "Servo kmitá ~180° keď dopyt ide tesne okolo 90°"
   → Fold hysterézia je v kóde (±2°) — ak kmitá aj tak:
@@ -291,8 +309,9 @@ TROUBLESHOOTING — symptóm → pravdepodobná príčina → čo kontrolovať
     znížiť, alebo ATC_STR_RAT_SMAX pridať proti oscilácii
 
 "Throttle je mŕtvy dlhšie než ~1 s po akomkoľvek manévri"
-  → Pivot coast trvá max 800 ms od uvoľnenia locku a potom sa
-    vždy sám ukončí — stuck nie je možný. Ak trvá dlhšie:
+  → Pivot coast trvá max VEC_TRN_MS (default 800 ms) od posledného
+    flipu/uvoľnenia locku a potom sa vždy sám ukončí — stuck nie je
+    možný (okrem VEC_TRN_MS=0, čo supresiu vypína). Ak trvá dlhšie:
     a) VEC_DEADBAND príliš vysoký → vec_mag pod prahom drží
        throttle na 0 cez w_db blend (zniz deadband)
     b) lock sa cyklicky re-aktivuje (throttle jde cez VEC_BRK
@@ -306,6 +325,8 @@ CHECKLIST pred prvým water testom po ladení
 [ ] YAW_CRS_RATE = nameraný plateau rate v Acro, nie teoretický
 [ ] YAW_CRS_THR = nameraný throttle% pri tom plateaue, nie default
 [ ] VEC_BRK doladený kruhovým manévrom (min. dobeh, žiadna oscilácia)
+[ ] VEC_TRN_MS = nameraný servo transit čas (overiť na brehu:
+    flip -90 → +90 a späť, merať do dorazu)
 [ ] ATC_STR_ACC_MAX = ATC_STR_DEC_MAX = 45 (nie 0.12!)
 [ ] DRIFT_* parametre — zatiaľ default, ladiť až po allocatori
 [ ] Log nastavený na steering desired/achieved + motor out pre
