@@ -761,6 +761,10 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             // real fx demand reappearing means the PID needs the angle back
             // immediately, and lock-release delay is the larger risk here
             _vec_rot_brake_active = false;
+			_vec_rot_brake_cnt = 0;  // stale count during the lock would bypass
+                                     // the debounce on re-entry (angle stays
+                                     // pinned at the stop so cond keeps counting)
+                                     // - each re-latch must re-earn its 3 ticks
             // start the servo-transit suppression window only on a
             // yaw-agreement release with no forward demand - the servo is
             // about to traverse +-90deg through center and any thrust during
