@@ -722,7 +722,9 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             (is_positive(yaw_rate_rads) != is_positive(n));
 
         if (rot_brake_cond) {
-            _vec_rot_brake_cnt++;
+            if (_vec_rot_brake_cnt < 3) {
+                _vec_rot_brake_cnt++;
+            }
         } else {
             _vec_rot_brake_cnt = 0;
         }
