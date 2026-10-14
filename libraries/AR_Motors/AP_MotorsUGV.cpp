@@ -236,8 +236,8 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     AP_GROUPINFO("LOIT_CST_THR", 31, AP_MotorsUGV, _loit_coast_thr, 1.0f),
 
     // @Param: LOIT_I_EQERR
-    // @DisplayName: Loiter drift method-2 equilibrium error
-    // @Description: Speed-PID error (m/s) below which the I-term is considered at drift equilibrium during the decel-to-stop window
+    // @DisplayName: Loiter drift method-2 equilibrium error (DEPRECATED)
+    // @Description: UNUSED since method-2 rework - kept for parameter compatibility. Equilibrium is now detected via stationary/sliding gates, not speed-PID error
     // @Units: m/s
     // @Range: 0 0.5
     // @User: Advanced
@@ -705,8 +705,8 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
 
         // brake latch condition: yaw rate measurably OPPOSES n. the old
         // (n*yaw_rate) < +0.01 latched on any near-zero product - including
-        // yaw~0 at pivot start from rest - producing latch->release->800ms
-        // dead-throttle coast on every pivot from rest. now:
+        // yaw~0 at pivot start from rest - producing latch->release->coast
+        // dead-throttle on every pivot from rest. now:
         // |yaw_rate| > ~0.5deg/s AND sign-opposed to n, for 3 consecutive
         // ticks (~60ms at 50Hz), rejecting single-sample gyro noise and
         // hull-wobble sign oscillation around zero. release stays on
@@ -735,7 +735,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             // release was premature (servo never crossed center) - end the
             // transit suppression instantly so the brake can work. a re-lock
             // on the OPPOSITE side does NOT clear it: the servo still needs
-            // the full ~0.8s transit window from the original release.
+            // the full VEC_TRN_MS transit window from the original release.
             if (_vec_pivot_coast_ms != 0 &&
                 is_positive(steering_angle_rad) == is_positive(_vec_rot_brake_angle_rad)) {
                 _vec_pivot_coast_ms = 0;
