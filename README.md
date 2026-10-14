@@ -251,9 +251,9 @@ if (yaw_error_deg > g2.motors.get_steer_floor_deadband_deg()) {
 }
 ```
 
-`SFL_DB=10°`, `SFL_GAIN=0.7`, `SFL_MAX=20%`, `SFL_IFRZ=45°`. Yaw error is measured against `_steering_target_yaw_cd` (the target *before* crab correction — fixing compounding where the corrected heading fed back into the error).
+`SFL_DB=10°`, `SFL_GAIN=0.7`, `SFL_MAX=20%`, `SFL_IFRZ=45°`. Yaw error is measured against `_steering_target_yaw_cd` — the target *before* crab correction, not the crab-compensated heading fed to the steering PID. Measuring against the corrected heading would subtract our own correction from the error each tick and compound. Note this means floor/I-freeze react to the *commanded* heading change, not the effective track error.
 
-**Freshness gate:** `steering_heading_fresh` = `_steering_heading_active_ms` written by `calc_steering_to_heading()` within 50 ms (`mode.h`). This scopes floor + cosine reduction to heading-driven modes — Auto, Guided, Loiter, **and Simple and Follow** (which also call `calc_steering_to_heading`).
+**Freshness gate:** `steering_heading_fresh` = `_steering_heading_active_ms` written by `calc_steering_to_heading()` within 75 ms (`mode.cpp:355-356`). This scopes floor + cosine reduction to heading-driven modes — Auto, Guided, Loiter, **and Simple and Follow** (which also call `calc_steering_to_heading`).
 
 **I-freeze (`SFL_IFRZ`) — reviewed, intentionally kept:**
 
