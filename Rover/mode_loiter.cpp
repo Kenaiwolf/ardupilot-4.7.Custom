@@ -148,11 +148,12 @@ void ModeLoiter::update()
             }
         }
 
-        // method 2: PID-residual drift measurement during the active
-        // decel-to-stop window. while the speed PID is still running
-        // (not yet "stopped", which would reset I), its I-term IS the
-        // thrust needed to hold position against environmental drift.
-        // equilibrium = commanded ~0, actual ~0, error small.
+        // method 2: PID-residual drift measurement while actively holding
+        // position. while the speed PID runs (not yet "stopped", which would
+        // reset I), its I-term IS the thrust needed to hold position against
+        // environmental drift. two sample regimes: stationary (held, |I| is
+        // the holding force) and sliding (boat still drifting outward, |I| is
+        // a lower bound, direction from the slide velocity).
         const AP_PIDInfo& tinfo = attitude_control.get_throttle_speed_pid_info();
         // equilibrium = platné meracie okno (bez podmienky na |I| - nulový I
         // je legitimna vzorka, znamena "namerany drift = 0", nie "ziadna vzorka")
@@ -162,7 +163,7 @@ void ModeLoiter::update()
         // sliding: boat still drifting outward while PID saturates - |I| is a
         // lower bound on drift, direction comes from the slide velocity.
         // decel-to-stop has rising |error| but FALLING distance (approach, not
-        // drift) - rising_count>0 excludes it where the old error-gate used to
+        // drift) - rising_count excludes it where the old error-gate used to.
         // rovnaky prah ako method-1: sustained outward trend, not a single distance spike.
         const bool stationary = fabsf(tinfo.actual) <= stop_speed;
         const float slide_band = MAX(stop_speed, 2.0f * stop_speed);
@@ -294,10 +295,10 @@ void ModeLoiter::update()
             // meracie okno platne ale |I| pod sumovym prahom = drift sa realne
             // nameria ako ~0. !sliding: pocas klzania s este nizkym I by
             // zero-sample korodoval odhad prave vtedy, ked ho treba - drift
-            // sa tam NEnameria ako nula, len sa I este nenavija
-            // nameria ako ~0. drz to vsetko niekolko tickov aby to nebol nahodny
-            // prechod, potom zapis nulovu vzorku - bez nej by sa stary odhad
-            // "zasekol" az do DRIFT_MAXAGE ked vietor/prud zhasne
+            // sa tam nenameria ako nula, len sa I este nenavija. drz to
+            // niekolko tickov aby to nebol nahodny prechod, potom zapis
+            // nulovu vzorku - bez nej by sa stary odhad "zasekol" az do
+            // DRIFT_MAXAGE ked vietor/prud zhasne
             if (++_drift_zero_count >= LOITER_DRIFT_ZERO_TICKS) {
                 Vector2f prev_ne;
                 Vector2f zero_est{0.0f, 0.0f};
