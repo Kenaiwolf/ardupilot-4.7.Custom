@@ -357,6 +357,14 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("YAW_CRS_THR", 47, AP_MotorsUGV, _yaw_crs_thr_pct, 49.0f),
 
+    // @Param: VEC_TRN_MS
+    // @DisplayName: Vectored servo-transit suppression window
+    // @Description: Throttle suppression window (ms) covering the servo sweep from one +-90deg stop through center to the opposite stop, started after a yaw-agreement brake release or a demanded-side flip from saturation. Any thrust during the sweep lands partly forward and contaminates the pivot. Set from measured full-to-full servo transit time. 0 disables suppression entirely
+    // @Units: ms
+    // @Range: 0 3000
+    // @User: Advanced
+    AP_GROUPINFO("VEC_TRN_MS", 48, AP_MotorsUGV, _vec_transit_ms, 800),
+
 
     AP_GROUPEND
 };
@@ -639,6 +647,15 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             throttle_norm *= brk_asym;
         }
 
+        // drop any latched brake / coast / debounce state when running
+        // outside autopilot/pid-steering context (e.g. just after a mode
+        // switch) - stale state must not survive a mode change
+        if (!nav_mode && !_pid_steering) {
+            _vec_rot_brake_active = false;
+            _vec_rot_brake_cnt = 0;
+            _vec_pivot_coast_ms = 0;
+        }
+
         // rotation brake (Option B, angle-locked): flipping the angle to the
         // opposite side while the hull is still overshooting the commanded
         // rotation is the actual failure mode this guards against - a ~15kg
@@ -668,12 +685,50 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // via atan2 for one tick and latch the brake on noise alone - the
         // deadband S-blend below will suppress the *output* either way, but
         // the latch itself would persist into the next tick without this
-        const bool rot_brake_trigger = (nav_mode || _pid_steering) &&
+        // side-flip coast trigger: demand flips sign while the previously
+        // commanded angle sat at a stop (or during an active coast window -
+        // restart covers a double-flip mid-transit). fires only with a pure
+        // rotation demand: fx>0.03 means the pivot ended and suppression is
+        // the wrong tool. gated by !_vec_rot_brake_active: during a lock the
+        // servo is held, not transiting, and zeroing throttle would kill the
+        // running brake. pivot-from-rest is safe: last angle is ~0, not a stop
+        if (!_vec_rot_brake_active &&
+            (nav_mode || _pid_steering) &&
+            vec_mag >= _vec_deadband &&
+            fabsf(n) > 0.05f &&
+            fabsf(fx) <= 0.03f &&
+            ((fabsf(_vec_last_steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
+              is_positive(n) != is_positive(_vec_last_steering_angle_rad)) ||
+             (_vec_pivot_coast_ms != 0 && is_positive(n) != is_positive(_vec_last_steering_angle_rad)))) {
+            _vec_pivot_coast_ms = AP_HAL::millis();
+        }
+
+        // brake latch condition: yaw rate measurably OPPOSES n. the old
+        // (n*yaw_rate) < +0.01 latched on any near-zero product - including
+        // yaw~0 at pivot start from rest - producing latch->release->800ms
+        // dead-throttle coast on every pivot from rest. now:
+        // |yaw_rate| > ~0.5deg/s AND sign-opposed to n, for 3 consecutive
+        // ticks (~60ms at 50Hz), rejecting single-sample gyro noise and
+        // hull-wobble sign oscillation around zero. release stays on
+        // n*yaw_rate >= 0: entry needs 3 opposed ticks, exit needs 1
+        // agreeing tick - asymmetric hysteresis against chatter. n flipping
+        // sign releases implicitly: during lock yaw opposes the old n, so
+        // after the flip it agrees with the new n (product >= 0)
+        const bool rot_brake_cond = (nav_mode || _pid_steering) &&
             vec_mag >= _vec_deadband &&
             fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
-            (n * yaw_rate_rads) < 0.01f;
+            fabsf(n) > 0.05f &&
+            fabsf(yaw_rate_rads) > radians(0.5f) &&
+            (is_positive(yaw_rate_rads) != is_positive(n));
 
-        if (!_vec_rot_brake_active && rot_brake_trigger) {
+        if (rot_brake_cond) {
+            _vec_rot_brake_cnt++;
+        } else {
+            _vec_rot_brake_cnt = 0;
+        }
+
+        if (!_vec_rot_brake_active && _vec_rot_brake_cnt >= 3) {
+            _vec_rot_brake_cnt = 0;
             // re-lock on the SAME side as the previous lock proves the earlier
             // release was premature (servo never crossed center) - end the
             // transit suppression instantly so the brake can work. a re-lock
@@ -684,11 +739,19 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
                 _vec_pivot_coast_ms = 0;
             }
             _vec_rot_brake_active = true;
-            _vec_rot_brake_angle_rad = steering_angle_rad;
+            // lock onto the side the hull is rotating FROM (the overshoot
+            // side) - reverse thrust through this angle produces genuine
+            // counter-torque. with the 3-tick debounce, steering_angle_rad
+            // may already sit on the post-flip (new n) side by latch time;
+            // locking that side would make the "brake" accelerate the
+            // overshoot. yaw_rate_rads is the authoritative side indicator
+            _vec_rot_brake_angle_rad = copysignf(vector_angle_max_rad, yaw_rate_rads);
         } else if (_vec_rot_brake_active &&
                    ((n * yaw_rate_rads) >= 0.0f || fabsf(fx) > 0.03f)) {
             // release on EITHER: (a) measured rotation agrees with commanded
-            // direction again (error crossed zero), or (b) forward/aft
+            // direction again - including implicitly after n changes sign,
+            // since during the lock yaw opposed the old n and therefore
+            // agrees with the new one - or (b) forward/aft
             // demand (fx) has reappeared - pivot has ended, atan2(n,fx) no
             // longer sits at/near the +-90deg envelope, so re-triggering the
             // instant this clears is not possible. fx=0.03 is a wide margin:
@@ -701,7 +764,8 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             // start the servo-transit suppression window only on a
             // yaw-agreement release with no forward demand - the servo is
             // about to traverse +-90deg through center and any thrust during
-            // that sweep lands partly forward
+            // that sweep lands partly forward. window length is VEC_TRN_MS;
+            // a side-flip from saturation can also arm it (above)
             if (fabsf(fx) <= 0.03f) {
                 _vec_pivot_coast_ms = AP_HAL::millis();
             }
@@ -714,8 +778,9 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             throttle_norm = copysignf(brake_frac * brk_asym, n);
         }
 
-        // servo-transit suppression: for 0.8s after a yaw-agreement brake
-        // release, force throttle to zero - the servo is still sweeping to
+        // servo-transit suppression: for VEC_TRN_MS after a yaw-agreement
+        // brake release or a demanded-side flip from saturation, force
+        // throttle to zero - the servo is still sweeping to
         // the opposite stop and any thrust through intermediate angles lands
         // partly forward, contaminating the pivot. placed AFTER the brake
         // block so an opposite-side re-lock inside the window is also held
@@ -723,7 +788,8 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // same-side re-lock (handled in the trigger branch above)
         if (_vec_pivot_coast_ms != 0) {
             if (fabsf(fx) > 0.03f ||
-                (AP_HAL::millis() - _vec_pivot_coast_ms) >= 800) {
+                _vec_transit_ms <= 0 ||
+                (AP_HAL::millis() - _vec_pivot_coast_ms) >= (uint32_t)_vec_transit_ms.get()) {
                 _vec_pivot_coast_ms = 0;
             } else {
                 throttle_norm = 0.0f;

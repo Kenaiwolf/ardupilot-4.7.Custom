@@ -324,10 +324,10 @@ private:
 	float   _vec_steering_filt;   // low-pass filtered steering_norm, same time constant as _vec_throttle_filt
     float   _vec_last_steering_angle_rad; // last commanded vectored-thrust steering angle (rad), held during deadband
     float   _vec_last_w;                  // last blend weight (w), held during deadband so throttle boost stays consistent
-    bool    _vec_rot_brake_active = false; // true while rotation-brake angle-lock (Option B) is holding steering_angle_rad fixed against atan2/direct-angle recompute and the steering PID  
+    bool    _vec_rot_brake_active = false; // true while rotation-brake angle-lock (Option B) is holding steering_angle_rad fixed against atan2/direct-angle recompute and the steering PID
     float   _vec_rot_brake_angle_rad = 0.0f; // steering angle (rad) locked in at the instant _vec_rot_brake_active was set true
     uint32_t _vec_pivot_coast_ms = 0;     // millis() timestamp of last yaw-agreement brake release; nonzero = post-release transit suppression active
-    bool    _vec_folded = false;          // fold hysteresis state: true while the atan2 demand is folded past +/-90deg, prevents chatter at the fold boundary  
+    bool    _vec_folded = false;          // fold hysteresis state: true while the atan2 demand is folded past +/-90deg, prevents chatter at the fold boundary
     AP_Int8 _vec_fossen;                  // VEC_FOSSEN: 0 = stock vectored blend + SFL floor/cosine reduction active, 1 = Fossen unified allocator (floor/cosine reduction auto-disabled)
     AP_Float _sfl_pivot_pct;              // SFL_PIVOT: raised floor throttle while yaw error >= SFL_IFRZ
     AP_Float _vec_brk_pct;                // VEC_BRK: rotation-brake reverse thrust scale (%), 0 disables
@@ -337,6 +337,8 @@ private:
 	AP_Float _vec_bld_strt_deg;           // VEC_BLD_STRT: steering angle (deg) below which throttle is pure geometric decomposition
     AP_Float _yaw_crs_rate_dps;           // YAW_CRS_RATE: reference yaw rate (deg/s) for pivot throttle calibration
     AP_Float _yaw_crs_thr_pct;            // YAW_CRS_THR: throttle (%) required to sustain YAW_CRS_RATE in pivot mode
+    AP_Int16 _vec_transit_ms;             // VEC_TRN_MS: servo-transit throttle suppression window (ms), 0 disables
+    uint8_t _vec_rot_brake_cnt = 0;       // consecutive opposing-yaw ticks for brake debounce (noise hysteresis)
     bool    _nav_context;                 // true if last steering request came from an autopilot mode
 	bool    _pid_steering;  // true when steering demand came through Mode::set_steering (closed-loop); manual bypass never sets it
     Vector2f _loiter_estimate_ne;           // Loiter-sourced drift estimate (m/s NE), gain applied
