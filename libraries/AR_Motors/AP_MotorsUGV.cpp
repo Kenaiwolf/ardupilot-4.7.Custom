@@ -779,7 +779,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
 
         if (_vec_rot_brake_active) {
             steering_angle_rad = _vec_rot_brake_angle_rad;
-            const float brake_scale = _vec_brk_pct * 0.01f;
+            const float brake_scale = MAX(_vec_brk_pct, 0.0f) * 0.01f;  // negative param must never flip the brake into forward thrust
             const float brake_frac = fabsf(n) * brake_scale;
             throttle_norm = copysignf(brake_frac * brk_asym, n);
         }
