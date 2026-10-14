@@ -116,6 +116,14 @@ public:
     // produces lateral IMU velocity that would be misread as drift
     float get_vectored_angle_rad()         const { return have_vectored_thrust() ? _vec_last_steering_angle_rad : 0.0f; }
 
+    // true while the servo-transit suppression window is active (throttle is
+    // being forced to zero pending servo traversal of +-90deg). loiter drift
+    // sampling gates on this - a sample taken mid-transit is not drift
+    bool is_in_servo_transit() const {
+        return _vec_pivot_coast_ms != 0 && _vec_transit_ms > 0 &&
+               (AP_HAL::millis() - _vec_pivot_coast_ms) < (uint32_t)_vec_transit_ms.get();
+    }
+
     // set an externally-measured wind+current drift estimate (m/s, North/East), one
     // independent slot per acquisition method.  the per-source gain (DRIFT_GAIN_LOIT /
     // DRIFT_GAIN_NAV) is applied here, at write-time, so the value returned by
