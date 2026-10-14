@@ -122,9 +122,14 @@ void ModeLoiter::update()
         const float rot_rate_dps = g2.motors.get_loit_rot_rate_dps();
         const bool rotating = (rot_ang_deg > 0.0f && vec_angle_deg > rot_ang_deg) ||
                               (rot_rate_dps > 0.0f && yaw_rate_degs > rot_rate_dps);
+        // declared here (not at :154) so method-1 can gate on it too: a coast
+        // sample taken while the thruster is traversing +-90deg is not drift -
+        // throttle is force-zeroed and the hull slides on inertia, not current
+        const bool in_transit = g2.motors.is_in_servo_transit();
         if (_drift_rising_count >= LOITER_DRIFT_RISING_TICKS &&
             fabsf(_throttle_nav_pct) < g2.motors.get_loit_coast_thr_pct() &&
             !_steer_floor_active &&
+            !in_transit &&
             !rotating) {
             Vector3f vel_ned;
             if (ahrs.get_velocity_NED(vel_ned)) {
@@ -151,7 +156,7 @@ void ModeLoiter::update()
         const AP_PIDInfo& tinfo = attitude_control.get_throttle_speed_pid_info();
         // equilibrium = platné meracie okno (bez podmienky na |I| - nulový I
         // je legitimna vzorka, znamena "namerany drift = 0", nie "ziadna vzorka")
-        const bool in_transit = g2.motors.is_in_servo_transit();
+        // in_transit declared above (shared with method-1 gate)
         const float stop_speed = fabsf(attitude_control.get_stop_speed());
         // stationary: boat genuinely held - |output| == drift holding force.
         // sliding: boat still drifting outward while PID saturates - |I| is a
@@ -243,29 +248,33 @@ void ModeLoiter::update()
                     // drift vector = opposite of the force that holds us in place
                     meas_dir_ne = Vector2f{-cosf(thrust_rad), -sinf(thrust_rad)};
                 }
-                // else: sliding with no measurable slide direction - skip the
-                // direction/write stage entirely this tick. the magnitude filter
+                // else: sliding with no measurable slide direction - the
+                // direction/write stage below is skipped entirely this tick
+                // via the !meas_dir_ne.is_zero() gate. the magnitude filter
                 // (_drift_i_filt above) still learned this tick's |I|, so the
-                // lower bound keeps updating; only the estimate write is held off.
-                // falling through to the thrust-vector fallback here would fabricate
-                // a direction OPPOSITE to the real slide.
+                // lower bound keeps updating; only the estimate write is held
+                // off. falling through would let the prior blend fabricate a
+                // direction OPPOSITE to the real slide.
             }
 
-            Vector2f est_dir_ne = meas_dir_ne;
-            Vector2f prev_ne;
-            if (g2.motors.get_current_estimate_ne(prev_ne) &&
-                prev_ne.length_squared() > sq(0.01f)) {
-                // prev direction is a prior with weight 0.65, fresh measurement
-                // has 0.35 - converges within a few ticks on real changes,
-                // still damps single-tick noise
-                est_dir_ne = meas_dir_ne * 0.35f + prev_ne.normalized() * 0.65f;
-                if (est_dir_ne.is_zero()) {
-                    // near-opposite vectors cancelled out - trust the fresh
-                    // measurement (a ~180deg flip is exactly the case where the
-                    // old direction was wrong)
-                    est_dir_ne = meas_dir_ne;
-                } else {
-                    est_dir_ne.normalize();
+            Vector2f est_dir_ne;
+            if (!meas_dir_ne.is_zero()) {
+                est_dir_ne = meas_dir_ne;
+                Vector2f prev_ne;
+                if (g2.motors.get_current_estimate_ne(prev_ne) &&
+                    prev_ne.length_squared() > sq(0.01f)) {
+                    // prev direction is a prior with weight 0.65, fresh measurement
+                    // has 0.35 - converges within a few ticks on real changes,
+                    // still damps single-tick noise
+                    est_dir_ne = meas_dir_ne * 0.35f + prev_ne.normalized() * 0.65f;
+                    if (est_dir_ne.is_zero()) {
+                        // near-opposite vectors cancelled out - trust the fresh
+                        // measurement (a ~180deg flip is exactly the case where the
+                        // old direction was wrong)
+                        est_dir_ne = meas_dir_ne;
+                    } else {
+                        est_dir_ne.normalize();
+                    }
                 }
             }
 
