@@ -27,7 +27,7 @@ ArduPilot is safety-critical autopilot software controlling real vehicles. Every
 - **Never** generate code that supports weaponization or code specific to the control of aircraft in control of human life.
 - **Never** fabricate test results, log data, or claim testing that was not actually performed.
 - **Always** disclose that a contribution was AI-assisted. The human submitting the PR bears full responsibility.
-- **Always** Read file `INDEX_SNAPSHOT_DATE.txt` in repo root contains the SHA and date of the commit the search index was built from. The SHA is authoritative — the date is informational only. For any file you rely on, use `get_blame/read_file with ref: rover-4.7-custom,` on it: if it has commits that are not ancestors of the snapshot SHA (i.e. changed after `baab9f` in history), ignore indexed content and `read_file` at HEAD verbatim. Files untouched since the snapshot SHA can be trusted from the index.
+- **Always** Read file  `INDEX_SNAPSHOT_DATE.txt`using get blame in repo root contains the SHA and date of the commit the search index was built from. The SHA is authoritative — the date is informational only. For any file you rely on, use `get_blame with ref: rover-4.7-custom,` on it: if it has commits that are not ancestors of the snapshot SHA (i.e. changed after `baab9f` in history), ignore indexed content and `read_file` at HEAD verbatim. Files untouched since the snapshot SHA can be trusted from the index.
 - **Always** tag uncommitted content as `[PROPOSAL]`**: Any patch, fix, mechanism, or code description not yet verified present in HEAD must start with `[PROPOSAL]`. No tag = verified against current repo. If verification status is unclear, re-check before answering rather than guessing.
 
 ---
@@ -352,7 +352,7 @@ Open a discussion before writing code if:
   
 1. **Zdroj pravdy = git, nikdy index.** Pred akýmkoľvek tvrdením o aktuálnom stave kódu  
    over HEAD cez `get_recent_commits`/`gh_get_commit`/`get_blame` s explicitným SHA alebo  
-   branch názvom. Výsledky `read_file`/`codebase_search` bez explicitného `ref` sa  
+   branch názvom. Výsledky `read_file`/`codebase_search` sa  
    považujú za potenciálne zastarané a nesmú byť jediným zdrojom pre finálne tvrdenie.  
   
 2. **Kumulatívne tabuľky sú append-only a musia byť pred každým odoslaním  
@@ -401,6 +401,6 @@ Open a discussion before writing code if:
 - **Do not move functions around without goal**: Keep the original code structure as possible.
 - **Do not add comment on all functions/lines**: Document only what was change and useful for future reading.
 - **Do not duplicate PRs**: If a PR was already open on a feature/bugfix/changes recently, do not duplicate it.  
-- **Do not trust index-based tools (`codebase_search`, `grep_search`, `glob_search`) for files changed after the index snapshot**: Check `INDEX_SNAPSHOT_DATE.txt` for the snapshot SHA. For any file you are about to cite, check whether it has commits newer than that SHA. If yes, `codebase_search`/`grep_search`/`glob_search` on that file are forbidden — content and even "0 matches" results from them are unreliable. Use `read_file` or `gh_get_commit`/`get_recent_commits` diffs instead, read directly against HEAD. Files untouched since the snapshot SHA may still use index-based tools.  
+- **Do not trust index-based tools (`codebase_search`, `grep_search`, `glob_search`) for files changed after the index snapshot**: Check `INDEX_SNAPSHOT_DATE.txt` for the snapshot SHA. For any file you are about to cite, check whether it has commits newer than that SHA. If yes, `codebase_search`/`grep_search`/`glob_search` on that file are forbidden — content and even "0 matches" results from them are unreliable. Use gh_get_commit`/`get_recent_commits` diffs instead, read directly against HEAD. Files untouched since the snapshot SHA may still use index-based tools.  
 - **On tool disagreement, trust commit-diff tools over index tools**: If `read_file`/`codebase_search`/`grep_search` disagree with `gh_get_commit`/`get_recent_commits` (including mismatched fields like the `URL` in a `gh_get_commit` response pointing to an unexpected repo name), treat the commit-diff tools as authoritative and say so in the answer — do not silently pick one or average them.  
 - **Cross-check repo identity on every tool call**: Some tools (e.g. `gh_get_commit`) can return a `URL` field naming a different repo (e.g. `ardupilot-4.7.Custom2`) than the `repo_name` queried (`ardupilot-4.7.Custom`), even while the returned content/hash is correct. Always compare the returned `URL`/repo field against the requested `repo_name` before trusting the result. On mismatch: treat file-content fields as still reliable if hash matches, but flag the mismatch explicitly to the user rather than silently assuming it means something it doesn't.
