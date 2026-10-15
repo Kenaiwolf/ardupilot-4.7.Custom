@@ -290,7 +290,7 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
 
     // @Param: VEC_FOSSEN
     // @DisplayName: Fossen-style vectored thrust unified allocator
-    // @Description: NEED MOT_VEC_ANGLEMAX=90!!! 0 = stock blended atan/direct mapping in output_regular, legacy steering-thrust floor (SFL_*) and cosine throttle reduction remain active; 1 = unified allocator mapping (surge force, yaw moment) to thruster angle+throttle. Braking-only reverse policy for autonomous modes is enforced inside the allocator. Mutually exclusive with SFL floor/cosine reduction - enabling this automatically disables them to avoid double throttle compensation
+    // @Description: NEED MOT_VEC_ANGLEMAX=90!!! 0 = stock blended atan/direct mapping in output_regular, legacy steering-thrust floor (SFL_*) and cosine throttle reduction remain active; 1 = unified allocator mapping (surge force, yaw moment) to thruster angle+throttle. Mutually exclusive with SFL floor/cosine reduction - enabling this automatically disables them to avoid double throttle compensation
     // @Values: 0:Disabled,1:Enabled
     // @User: Advanced
     AP_GROUPINFO("VEC_FOSSEN", 39, AP_MotorsUGV, _vec_fossen, 0),
@@ -2034,4 +2034,3 @@ namespace AP {
         return AP_MotorsUGV::get_singleton();
     }
 }
-
