@@ -258,7 +258,7 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     AP_GROUPINFO("LOIT_I_ALPHA", 34, AP_MotorsUGV, _loit_i_alpha, 0.10f),
 
     // @Param: LOIT_I_DISAG
-    // @DisplayName: Loiter drift method-2 disagreement gate
+    // @DisplayName: Loiter drift method-1 and 2 disagreement gate
     // @Description: If a new estimate differs from the stored one by more than this fraction of its magnitude, blend only 25% of the way (NAV-style trend check)
     // @Range: 0.1 2.0
     // @User: Advanced
