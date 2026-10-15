@@ -130,8 +130,8 @@ public:
     // get_current_estimate_ne() below is already the final, PID-ready corrected vector --
     // Mode::apply_drift_compensation()/calc_throttle() must NOT apply any further gain to it.
     void set_loiter_estimate_ne(const Vector2f &drift_ne);
-    // nav context: true while an autopilot mode is driving steering/throttle.
-    void set_nav_estimate_ne(const Vector2f &drift_ne);
+    // Guided/nav-mode sourced drift estimate (m/s NE); DRIFT_GAIN_NAV applied inside
+	void set_nav_estimate_ne(const Vector2f &drift_ne);
 
     // seed the opposite-mode slot directly with an already-calibrated value
     // (e.g. handoff at mode entry) - unlike set_loiter/nav_estimate_ne(),
