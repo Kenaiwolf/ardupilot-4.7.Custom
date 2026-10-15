@@ -105,12 +105,16 @@ public:
     float get_loit_coast_thr_pct()           const { return _loit_coast_thr; }
     float get_loit_i_eq_err_mps()            const { return _loit_i_eq_err; }
     float get_loit_i_min()                   const { return _loit_i_min; }
-    float get_loit_i_alpha()                 const { return _loit_i_alpha; }
+
+    // clamp at read-time: @Range is GCS metadata only - a param set outside
+    // [0,1] via mavlink/param-file would make the loiter EMA diverge
+    float get_loit_i_alpha()                 const { return constrain_float(_loit_i_alpha, 0.0f, 1.0f); }
     float get_loit_i_disagree()              const { return _loit_i_disagree; }
     float get_loit_rot_ang_deg()             const { return _loit_rot_ang_deg; }
     float get_loit_rot_rate_dps()            const { return _loit_rot_rate_dps; }
     float get_drift_est_yaw_rate_dps()       const { return _drift_est_yaw_rate_dps; }
-    // last commanded vectored-thrust steering angle (rad). 0 when vectored
+
+	// last commanded vectored-thrust steering angle (rad). 0 when vectored
     // thrust is disabled. used by loiter method-1 gating: a deflected
     // thruster rotates the hull, and rotation about the ~0.6m pivot radius
     // produces lateral IMU velocity that would be misread as drift
