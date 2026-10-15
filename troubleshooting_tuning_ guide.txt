@@ -199,12 +199,12 @@ LOIT_CST_THR [%, default 1.0]
   meranie driftu metódou 1. Ak je speed PID pri držaní pozície
   neustále nad týmto, metóda 1 nikdy nevzoriekuje.
 
-LOIT_I_EQERR [m/s, default 0.10]  — DEPRECATED, nepouziva sa.  
-  Metoda 2 uz nekontroluje velkost chyby; vzorkuje pri dvoch  
-  stavoch: lod stoji (|v| <= LOIT_DRF_MIN... presne stop_speed)  
-  alebo klze pomaly von z kruhu (|v| <= 2*stop_speed a vzdalenost  
-  od bodu rastie LOITER_DRIFT_RISING_TICKS tickov za sebou).  
-  Parameter este existuje v tabulke (EEPROM), len ho nikto necita.  
+LOIT_I_EQERR [m/s, default 0.10]  — DEPRECATED, nepouziva sa.
+  Metoda 2 uz nekontroluje velkost chyby; vzorkuje pri dvoch
+  stavoch: lod stoji (|v| <= LOIT_DRF_MIN... presne stop_speed)
+  alebo klze pomaly von z kruhu (|v| <= 2*stop_speed a vzdalenost
+  od bodu rastie LOITER_DRIFT_RISING_TICKS tickov za sebou).
+  Parameter este existuje v tabulke (EEPROM), len ho nikto necita.
 
 LOIT_I_MIN [0-0.5, default 0.02]
   Minimálny I-term akceptovaný ako drift sample.
@@ -231,9 +231,9 @@ DRIFT_EST_YR [deg/s, default 15]
 
 VZÁJOMNÉ VZŤAHY drift parametrov:
 - LOIT_ROT_RAT > DRIFT_EST_YR vždy (estimator je konzervatívnejší)
-- LOIT_CST_THR a sliding prahe (stop_speed, 2*stop_speed band,  
-  LOITER_DRIFT_RISING_TICKS) definuju *kedy* sa meria — ak su  
-  tesne, metody nikdy nevzorkuju a DRIFT_G_* nemaju co skalovat  
+- LOIT_CST_THR a sliding prahe (stop_speed, 2*stop_speed band,
+  LOITER_DRIFT_RISING_TICKS) definuju *kedy* sa meria — ak su
+  tesne, metody nikdy nevzorkuju a DRIFT_G_* nemaju co skalovat
 - DRIFT_MAXAGE chráni celý subsystém — ak je 0, všetko ostatné
   je mŕtve nezávisle od ostatných hodnôt
 
@@ -290,15 +290,17 @@ TROUBLESHOOTING — symptóm → pravdepodobná príčina → čo kontrolovať
   → DRIFT_MAXAGE vypršal (dlho od posledného merania)
   → LOIT_ROT_ANG/RAT bráni vzorkovaniu počas rotácie — skontroluj
     či loď počas drift okna nebýva rotovaná
-  → Metóda 1 alebo 2 nie je spustená: LOIT_CST_THR príliš vysoký  
-    (PID nikdy necoastuje), LOIT_I_MIN príliš tesný, alebo sa  
-    vzorkovanie blokuje servo transitom / rotáciou  
+  → Metóda 1 alebo 2 nie je spustená: LOIT_CST_THR príliš vysoký
+    (PID nikdy necoastuje), LOIT_I_MIN príliš tesný, alebo sa
+    vzorkovanie blokuje servo transitom / rotáciou
 
 "Brzdenie dopredného pohybu (s reversal thrust) je slabé/agresívne"
   → Linear surge brake používa VEC_BRK_ASYM rovnako ako rotation
     brake — ladiť spolu s VEC_BRK_ASYM
   → skontroluj throttle_norm sign vs ground_speed v logu — ak sa
-    gate netriggeruje, skontroluj nav_mode/_pid_steering flagy
+    gate netriggeruje, skontroluj throttle_norm sign a vec_mag vs
+    VEC_DEADBAND v logu (allocator bezi vsade okrem Manual —
+    ziadne modove flagy uz neexistuju)
 
 "Po zmene dopytu z 0 na plnú rotáciu je oneskorenie"
   → Steering output rampa: ATC_STR_ACC_MAX (45 deg/s² je zhruba

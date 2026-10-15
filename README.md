@@ -100,8 +100,9 @@ Renamed from `VEC_ALLOC` to `VEC_FOSSEN` on 2026-10-11 (same param index 39) whe
 
 ```cpp
 void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_speed,
-                                     bool nav_mode, float &steering_cd, float &throttle_pct, float dt)
-// AP_MotorsUGV.cpp ~456-457
+                                     float &steering_cd, float &throttle_pct, float dt)
+// AP_MotorsUGV.cpp ~497-498 — allocator bezi vzdy, ked bezi vectored path;
+// Manual je jediny bypass (obchadza ho cez _scale_steering / SPEED_SCALING)
 ```
 
 ## 3. `libraries/APM_Control/AR_AttitudeControl.cpp/.h`
@@ -284,9 +285,6 @@ void Mode::set_steering(float steering_value)
     if (allows_stick_mixing() && g2.stick_mixing > 0) {
         steering_value = channel_steer->stick_mixing((int16_t)constrain_float(steering_value, -4500.0f, 4500.0f));
     }
-    g2.motors.set_nav_context(!has_manual_input());
-    g2.motors.set_pid_steering(true);
-    g2.motors.set_yaw_rate_max_rads(radians(g2.attitude_control.get_steer_rate_max_degs()));
     g2.motors.set_steering(steering_value);
 }
 ```
@@ -473,7 +471,7 @@ This section documents decisions made during the vectored-thrust allocator rewor
 | Brake trigger noise guard | `rot_brake_cond` requires `vec_mag >= VEC_DEADBAND` AND `\|n\| > 0.05` AND `\|yaw_rate\| > 0.5 deg/s` AND sign(yaw_rate) opposing sign(n), held for 3 consecutive ticks (~60 ms debounce) — prevents noise-level sign flips from latching the lock while `w_db` suppresses output. The old `(n*yaw_rate) < 0.01` trigger also fired at yaw_rate~0 on every pivot start from rest (angle already at stop before the hull spins up), producing a spurious latch->release->coast dead-throttle sequence each time — asymmetric hysteresis: entry needs 3 opposed ticks, exit needs 1 agreeing tick |
 | `rate_ratio` unit mismatch | fixed — `n` is now normalized by `YAW_CRS_RATE` (deg/s), so `t_pivot = YAW_CRS_THR * rate_ratio^VEC_YAW_EXP` equals `YAW_CRS_THR` at exactly `YAW_CRS_RATE`; previously `n` (dimensionless) was divided by `yaw_rate_max` making `YAW_CRS_THR` unreachable — commit `82ab96bb`, dead `yaw_rate_max` local removed |
 | `VEC_DEADBAND` hard switch | replaced by sin² S-curve blend `w_db` — full normal path always computes, output blends between frozen hold-state and computed values across the deadband edge; `w_db` forced to 1 while rotation-brake lock is active — commit `bbc508af` + gate commit |
-| `stop_vehicle` flag bypass | resolved (`f6d3e4d3`, `a1bd7a7c`) — asserts `set_nav_context` and `set_pid_steering` before `set_steering`; `Mode::set_steering` bypass is deliberate. `set_yaw_rate_max_rads` later removed entirely — it was write-only, no consumer in `vectored_allocate` (commit `36a5afb0`/`5218c988`) |
+| `stop_vehicle` flag bypass | reverted to upstream master — `stop_vehicle()` again calls `Mode::set_steering()`, restoring stick-mixing during controlled stops. The entire `nav_mode`/`_pid_steering` flag layer was removed: allocator physics (rot-brake, brk_asym, coast) now runs unconditionally wherever the allocator runs; the loiter-runaway fix (`a85bd733`, int16 overflow clamp) is unaffected |
 | SFL/steering-floor duplication | SFL gated to legacy path only — `use_vec_fossen()` must be false for the floor to apply (`mode.cpp:429`); allocator covers pivot authority via `t_pivot`, SFL was a pre-allocator patch, not a foundation — commits `41a022a2`, `c36969ff` (param name fix `use_vec_alloc` → `use_vec_fossen`) |
 | Pivot-to-pivot transit (coast) | `throttle_norm = 0` for `VEC_TRN_MS` (default 800 ms), started by a yaw-agreement lock release OR a demanded-side flip from saturation (|n|>0.05, |fx|<=0.03, sign flip vs `_vec_last_steering_angle_rad`, not while brake-locked) — covers full servo transit so no thrust lands through intermediate angles; the window restarts on any additional side flip inside it (return transit needs the same time); early exit on `\|fx\| > 0.03`; re-lock on SAME side cancels instantly; opposite-side re-lock does NOT shorten the window — commit `72a193b4` + param + flip-trigger update |
 | Fold-boundary chatter | hysteresis implemented — `fold-in` at `\|delta\| > 90°+2°`, `fold-out` at `\|delta\| < 90°-2°`, single `_vec_folded` bool; protects `VEC_RESID_TC`=0 or very small TC — commit `dfa31ace` |
@@ -502,6 +500,6 @@ This section documents decisions made during the vectored-thrust allocator rewor
 
 ## 12. Tuning & troubleshooting
 
-See [`troubleshooting_tuning_ guide.txt`](./troubleshooting_tuning_%20guide.txt) (repo root) for a field reference on tuning the §2.5 vectored-thrust allocator: pivot-speed/overshoot decision tree (`SFL_PIVOT`, `ATC_STR_RAT_MAX`), rotation-brake tuning (`VEC_BRK`, `ATC_STR_DEC_MAX`), fold-boundary chatter suppression (`VEC_RESID_TC`), the no-reverse-at-rest gate, a per-mode table of which gates are active (Manual/Acro/Loiter-Guided-Auto), and an instant fallback (`VEC_FOSSEN=0`) for any unexpected behavior on the water. No known unresolved code items remain — `VEC_BRK_ASYM` parametrizes the reverse-thrust asymmetry (the old hardcoded 0.8 is gone), `VEC_TRN_MS` parametrizes the servo-transit suppression window (the old hardcoded 800 ms is gone, 0 disables), authority(v,δ) normalization was rejected by decision, and the counter-rotation gap is handled by the coast suppression window (`72a193b4`) plus   `ATC_STR_DEC_MAX`/`ATC_STR_ACC_MAX` tuning.
+See [`troubleshooting_tuning_ guide.txt`](./troubleshooting_tuning_%20guide.txt) (repo root) for a field reference on tuning the §2.5 vectored-thrust allocator: pivot-speed/overshoot decision tree (`SFL_PIVOT`, `ATC_STR_RAT_MAX`), rotation-brake tuning (`VEC_BRK`, `ATC_STR_DEC_MAX`), fold-boundary chatter suppression (`VEC_RESID_TC`), the servo-transit coast window (`VEC_TRN_MS`), and an instant fallback (`VEC_FOSSEN=0`) for any unexpected behavior on the water.
 
 [![Discord](https://img.shields.io/discord/674039678562861068.svg)](https://ardupilot.org/discord)
