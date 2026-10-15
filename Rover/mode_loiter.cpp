@@ -238,25 +238,24 @@ void ModeLoiter::update()
                 if (!sliding) {
                     // source 2 (boat fully at standstill): drift points opposite the
                     // actual thrust vector. thrust dir in earth frame = yaw + thruster
-                    // steering angle. get_steering() is centideg (+/-4500) -
-                    // normalise to -1..1 first, THEN multiply by max angle in radians
-                    const float steer_ang_rad = (g2.motors.get_steering() / 4500.0f)
-                                                * radians(g2.motors.get_vector_angle_max());
+                    // angle. use the allocator's real commanded angle -
+                    // get_vectored_angle_rad() survives fold, deadband freeze and
+                    // rot-brake lock, where the raw PID demand (get_steering)
+                    // does NOT reflect where the thruster actually points.
+                    // drift estimation is vectored-only by design - a non-vectored
+                    // hull cannot hold station against lateral current anyway.
+                    // edge case: this branch assumes a running Fossen allocator -
+                    // under VEC_FOSSEN=0 fallback get_vectored_angle_rad() is
+                    // stale/zero (reads yaw only) instead of live demand. Accepted:
+                    // everything else degrades in that fallback anyway.
+                    const float thrust_rad = ahrs.get_yaw_rad() +
+                                             g2.motors.get_vectored_angle_rad();
                     // assumes bow-pull thruster convention: thrust dir = yaw + steer
                     // angle. for a stern-push or inverted-output thruster this is
                     // 180deg off - flip the sign of meas_dir_ne below if needed.
-                    const float thrust_rad = ahrs.get_yaw_rad() + steer_ang_rad;
                     // drift vector = opposite of the force that holds us in place
                     meas_dir_ne = Vector2f{-cosf(thrust_rad), -sinf(thrust_rad)};
                 }
-                // else: sliding with no measurable slide direction - the
-                // direction/write stage below is skipped entirely this tick
-                // via the !meas_dir_ne.is_zero() gate. the magnitude filter
-                // (_drift_i_filt above) still learned this tick's |I|, so the
-                // lower bound keeps updating; only the estimate write is held
-                // off. falling through would let the prior blend fabricate a
-                // direction OPPOSITE to the real slide.
-            }
 
             Vector2f est_dir_ne;
             if (!meas_dir_ne.is_zero()) {
