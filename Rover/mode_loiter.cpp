@@ -256,6 +256,7 @@ void ModeLoiter::update()
                     // drift vector = opposite of the force that holds us in place
                     meas_dir_ne = Vector2f{-cosf(thrust_rad), -sinf(thrust_rad)};
                 }
+            }
 
             Vector2f est_dir_ne;
             if (!meas_dir_ne.is_zero()) {
