@@ -289,7 +289,10 @@ void ModeLoiter::update()
             }
 
             if (!est_dir_ne.is_zero()) {
-                Vector2f new_est = est_dir_ne * drift_mag_mps;
+                // scale the new sample into the stored (post-gain) domain
+                // BEFORE the disagreement gate - prev_ne from
+                // get_current_estimate_ne already has the gain applied
+                Vector2f new_est = est_dir_ne * drift_mag_mps * g2.motors.get_drift_comp_gain_loiter();
                 // NAV-style disagreement gate: don't jump to a very different
                 // estimate in one shot, blend a fraction of the way
                 if (g2.motors.get_current_estimate_ne(prev_ne)) {
