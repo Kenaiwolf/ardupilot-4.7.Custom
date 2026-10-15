@@ -266,17 +266,17 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
 
     // @Param: LOIT_ROT_ANG
     // @DisplayName: Loiter drift method-1 rotation angle gate
-    // @Description: Vectored-thruster deflection (deg) above which coast drift sampling is blocked. Rotating the hull about its pivot point produces real lateral IMU velocity (v = yaw_rate * pivot_radius) that would be misread as drift. 0 disables the gate
+    // @Description: Vectored-thruster deflection (deg) above which coast drift sampling is blocked. Rotating the hull about its pivot point produces real lateral IMU velocity (v = yaw_rate * pivot_radius) that would be misread as drift.
     // @Units: deg
-    // @Range: 0 90
+    // @Range: 1 90
     // @User: Advanced
     AP_GROUPINFO("LOIT_ROT_ANG", 36, AP_MotorsUGV, _loit_rot_ang_deg, 15.0f),
 
     // @Param: LOIT_ROT_RAT
     // @DisplayName: Loiter drift method-1 yaw rate gate
-    // @Description: Yaw rate (deg/s) above which coast drift sampling is blocked. During rotation the IMU orbits the pivot point (~0.6m) - e.g. 45deg/s = ~0.5m/s false drift. 0 disables the gate
+    // @Description: Yaw rate (deg/s) above which coast drift sampling is blocked. During rotation the IMU orbits the pivot point (~0.6m) - e.g. 45deg/s = ~0.5m/s false drift.
     // @Units: deg/s
-    // @Range: 0 90
+    // @Range: 1 90
     // @User: Advanced
     AP_GROUPINFO("LOIT_ROT_RAT", 37, AP_MotorsUGV, _loit_rot_rate_dps, 20.0f),
 
@@ -284,7 +284,7 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @DisplayName: Nav drift estimator yaw rate gate
     // @Description: Yaw rate (deg/s) above which the shared drift-estimator window (navigate_to_waypoint/Guided) is invalidated. Keep tighter than LOIT_ROT_RAT - the estimator needs long clean windows, not sample count
     // @Units: deg/s
-    // @Range: 0 45
+    // @Range:  45
     // @User: Advanced
     AP_GROUPINFO("DRIFT_EST_YR", 38, AP_MotorsUGV, _drift_est_yaw_rate_dps, 15.0f),
 
@@ -495,7 +495,7 @@ bool AP_MotorsUGV::get_current_estimate_ne(Vector2f &current_ne) const
 // per-regime states: atan2 handles 0/45/90 deg continuously, saturation folds
 // residual demand into the other channel instead of dropping it.
 void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_speed,
-                                     bool nav_mode, float &steering_cd, float &throttle_pct, float dt)
+                                     float &steering_cd, float &throttle_pct, float dt)
 {
     // measured yaw rate (rad/s, earth frame = body yaw rate on a boat)
     const float yaw_rate_rads = AP::ahrs().get_yaw_rate_earth();
@@ -539,7 +539,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
 
         // fold demands pointing aft into the +/-90 deg envelope with negative
         // thrust (reverse). reverse reachable only via this fold: fx<0 while
-        // moving = braking, and the nav_mode gate above zeroes it at rest.
+        // moving = braking; no mode-level gating applies here by design.
         // hysteresis on the fold boundary: without it, a demand hovering at
         // ~90deg jitters delta between +89.9/-89.9, which swings the servo
         // ~180deg and flips throttle sign every tick. fold in only past
@@ -640,20 +640,9 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // ground_speed sign-mismatch only created a dead zone (while cruising
         // in reverse, ground_speed and throttle_norm are both negative, so the
         // old condition never fired even though the same correction applies).
-        // same autopilot-only gate as rotation brake
-        if ((nav_mode || _pid_steering) &&
-            fabsf(steering_angle_rad) < vector_angle_max_rad - 1e-4f &&
+        if (fabsf(steering_angle_rad) < vector_angle_max_rad - 1e-4f &&
             throttle_norm < 0.0f) {
             throttle_norm *= brk_asym;
-        }
-
-        // drop any latched brake / coast / debounce state when running
-        // outside autopilot/pid-steering context (e.g. just after a mode
-        // switch) - stale state must not survive a mode change
-        if (!nav_mode && !_pid_steering) {
-            _vec_rot_brake_active = false;
-            _vec_rot_brake_cnt = 0;
-            _vec_pivot_coast_ms = 0;
         }
 
         // rotation brake (Option B, angle-locked): flipping the angle to the
@@ -677,9 +666,9 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // always applies here: with the angle locked, this thrust can never
         // land on the "accidentally forward" side the way an unlocked flip
         // could - it is always genuine counter-rotation reverse thrust.
-        // MOT_VEC_BRK scales the magnitude (0 = brake off). active in
-        // autopilot modes (nav_mode) and in Acro (pid_steering); excluded in
-        // Manual, which must stay a pure RC passthrough.
+        // MOT_VEC_BRK scales the magnitude (0 = brake off). runs whenever the
+        // allocator runs; Manual never reaches this code (bypasses via
+        // _scale_steering=false).
         // vec_mag >= _vec_deadband guard: without it, pure sensor/filter
         // noise at near-zero demand could set steering_angle_rad near +-90
         // via atan2 for one tick and latch the brake on noise alone - the
@@ -693,7 +682,6 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // servo is held, not transiting, and zeroing throttle would kill the
         // running brake. pivot-from-rest is safe: last angle is ~0, not a stop
         if (!_vec_rot_brake_active &&
-            (nav_mode || _pid_steering) &&
             vec_mag >= _vec_deadband &&
             fabsf(n) > 0.05f &&
             fabsf(fx) <= 0.03f &&
@@ -714,7 +702,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // agreeing tick - asymmetric hysteresis against chatter. n flipping
         // sign releases implicitly: during lock yaw opposes the old n, so
         // after the flip it agrees with the new n (product >= 0)
-        const bool rot_brake_cond = (nav_mode || _pid_steering) &&
+        const bool rot_brake_cond =
             vec_mag >= _vec_deadband &&
             fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
             fabsf(n) > 0.05f &&
@@ -1067,12 +1055,6 @@ void AP_MotorsUGV::output(bool armed, float ground_speed, float dt)
     srv.cork();
     SRV_Channels::output_ch_all();
     srv.push();
-
-    // nav context is per-cycle: a mode must re-assert it every update via
-    // Mode::set_steering(); clearing it here (after all output dispatch)
-    // means a stale true can never persist into a manual-mode frame
-    _nav_context = false;
-    _pid_steering = false;
 }
 
 // test steering or throttle output as a percentage of the total (range -100 to +100)
@@ -1440,7 +1422,7 @@ void AP_MotorsUGV::output_regular(bool armed, float ground_speed, float steering
                 if (_vec_fossen > 0) {
                     // unified allocator path (VEC_FOSSEN=1): mapping lives in vectored_allocate() — math differs from the legacy blend below (fold hysteresis, cos-floor, blend curve, brakes)
                     vectored_allocate(throttle * 0.01f, steering * (1.0f/4500.0f), ground_speed,
-                                      _nav_context, steering, throttle, dt);
+                                      steering, throttle, dt);
                 } else {
                 // normalise desired steering and throttle to ease calculations
                 const float steering_norm = steering / 4500.0f;

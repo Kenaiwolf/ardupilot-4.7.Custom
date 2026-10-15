@@ -131,8 +131,6 @@ public:
     // Mode::apply_drift_compensation()/calc_throttle() must NOT apply any further gain to it.
     void set_loiter_estimate_ne(const Vector2f &drift_ne);
     // nav context: true while an autopilot mode is driving steering/throttle.
-    void set_nav_context(bool nav) { _nav_context = nav; }
-	void set_pid_steering(bool en) { _pid_steering = en; }
     void set_nav_estimate_ne(const Vector2f &drift_ne);
 
     // seed the opposite-mode slot directly with an already-calibrated value
@@ -163,7 +161,7 @@ public:
 
     // true when the unified allocator (VEC_FOSSEN=1) handles vectored thrust;
     // mode-level legacy patches (e.g. steering floor) must not run on top of it
-    bool use_vec_fossen() const { return _vec_fossen != 0; }
+    bool use_vec_fossen() const { return _vec_fossen > 0; }
 
     // output to motors and steering servos
     // ground_speed should be the vehicle's speed over the surface in m/s
@@ -347,8 +345,6 @@ private:
     AP_Float _yaw_crs_thr_pct;            // YAW_CRS_THR: throttle (%) required to sustain YAW_CRS_RATE in pivot mode
     AP_Int16 _vec_transit_ms;             // VEC_TRN_MS: servo-transit throttle suppression window (ms), 0 disables
     uint8_t _vec_rot_brake_cnt = 0;       // consecutive opposing-yaw ticks for brake debounce (noise hysteresis)
-    bool    _nav_context;                 // true if last steering request came from an autopilot mode
-	bool    _pid_steering;  // true when steering demand came through Mode::set_steering (closed-loop); manual bypass never sets it
     Vector2f _loiter_estimate_ne;           // Loiter-sourced drift estimate (m/s NE), gain applied
     uint32_t _loiter_estimate_ms;           // ms _loiter_estimate_ne last updated; 0=never
     Vector2f _nav_estimate_ne;           // Guided-sourced drift estimate (m/s, NE), gain applied
