@@ -284,7 +284,7 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @DisplayName: Nav drift estimator yaw rate gate
     // @Description: Yaw rate (deg/s) above which the shared drift-estimator window (navigate_to_waypoint/Guided) is invalidated. Keep tighter than LOIT_ROT_RAT - the estimator needs long clean windows, not sample count
     // @Units: deg/s
-    // @Range:  45
+    // @Range: 0 45
     // @User: Advanced
     AP_GROUPINFO("DRIFT_EST_YR", 38, AP_MotorsUGV, _drift_est_yaw_rate_dps, 15.0f),
 
