@@ -144,6 +144,15 @@ void ModeLoiter::update()
                     sample_ne -= ahrs.body_to_earth2D(ff_body);
                 }
 
+                // same disagreement gate as method-2 (:285): a single noisy EKF
+                // velocity sample must not jump the drift estimate in one tick
+                Vector2f prev_ne;
+                if (g2.motors.get_current_estimate_ne(prev_ne)) {
+                    const Vector2f dv = sample_ne - prev_ne;
+                    if (dv.length() > g2.motors.get_loit_i_disagree() * MAX(prev_ne.length(), 0.1f)) {
+                        sample_ne = prev_ne + dv * 0.25f;
+                    }
+                }
                 g2.motors.set_loiter_estimate_ne(sample_ne);
             }
         }
