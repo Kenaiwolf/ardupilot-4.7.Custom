@@ -238,9 +238,9 @@ private:
 
     // unified vectored-thrust allocator (VEC_FOSSEN=1): maps desired surge force
     // fx_req and yaw moment n_req (both normalised -1..1) to steering centidegrees
-    // and throttle percent; nav_mode enables the braking-only autonomous reverse policy
+    // and throttle percent; runs unconditionally wherever the allocator runs
     void vectored_allocate(float fx_req, float n_req, float ground_speed,
-                           bool nav_mode, float &steering_cd, float &throttle_pct, float dt);
+                           float &steering_cd, float &throttle_pct, float dt);
 
     // output to skid steering channels
     void output_skid_steering(bool armed, float steering, float throttle, float dt);
