@@ -494,17 +494,7 @@ bool Mode::stop_vehicle()
     if (!stopped) {
         steering_out = attitude_control.get_steering_out_rate(0.0, g2.motors.limit.steer_left, g2.motors.limit.steer_right, rover.G_Dt);
     }
-    // stop_vehicle() is only ever called from autopilot modes (Auto/Guided/RTL/
-    // SmartRTL/Follow/Circle/Dock, verified via is_autopilot_mode() override
-    // audit) or AR_WPNav_OA's avoidance-stop, never from Manual/Acro/Steering.
-    // Bypass Mode::set_steering() here deliberately (its stick-mixing re-read
-    // of the RC channel and slew/wrap handling are irrelevant/unsafe during a
-    // controlled stop), but still assert the same nav/brake-policy flags it
-    // would have set, so vectored_allocate()'s no-reverse/brake gating applies
-    // correctly during this phase instead of running on stale flag state.
-    g2.motors.set_nav_context(true);
-    g2.motors.set_pid_steering(true);
-    g2.motors.set_steering(steering_out * 4500.0);
+    set_steering(steering_out * 4500.0);
 
     // return true once stopped
     return stopped;
@@ -860,13 +850,6 @@ void Mode::set_steering(float steering_value)
     if (allows_stick_mixing() && g2.stick_mixing > 0) {
         steering_value = channel_steer->stick_mixing((int16_t)constrain_float(steering_value, -4500.0f, 4500.0f));
     }
-    // assert nav context so the motors layer can apply autopilot-only limits
-    // (e.g. no autonomous reverse); Manual bypasses this path entirely,
-    // Acro/Steering report has_manual_input() and keep it false
-    g2.motors.set_nav_context(!has_manual_input());
-    // any steering demand through this path is closed-loop (PID-shaped);
-    // Manual bypasses Mode::set_steering entirely and leaves it false
-    g2.motors.set_pid_steering(true);
     g2.motors.set_steering(steering_value);
 }
 
