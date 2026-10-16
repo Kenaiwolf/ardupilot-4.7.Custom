@@ -50,6 +50,14 @@ bool Mode::enter()
         // clear sailboat tacking flags
         g2.sailboat.clear_tack();
 
+        // per-session throttle/steering state: do not carry stale values
+        // across a mode re-entry. the 75ms heading window and the
+        // coast-sampler inputs are re-written every calc_throttle tick
+        // anyway; clearing them here just removes the one-tick stale read
+        _steering_heading_active_ms = 0;
+        _steer_floor_active = false;
+        _throttle_nav_pct = 0.0f;
+
         // drift handoff: autopilot modes seed from Loiter's estimate
         if (is_autopilot_mode() && (mode_number() != Number::LOITER)) {
             // reset estimator window - no stale window across mode sessions
