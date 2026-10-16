@@ -145,7 +145,7 @@ const AP_Param::GroupInfo AP_MotorsUGV::var_info[] = {
     // @Description: Commanded steering/throttle magnitude below which the vectored angle is frozen (anti-jitter near zero throttle)
     // @Range: 0.0 0.2
     // @User: Advanced
-    AP_GROUPINFO("VEC_DEADBAND", 17, AP_MotorsUGV, _vec_deadband, 0.03f),
+    AP_GROUPINFO("VEC_DEADBAND", 17, AP_MotorsUGV, _vec_deadband, 0.02f),
 
     // @Param: VEC_BLND_THR
     // @DisplayName: Vectored thrust blend throttle
@@ -823,8 +823,14 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         }
         steering_angle_rad = w_db * steering_angle_rad + (1.0f - w_db) * _vec_last_steering_angle_rad;
         throttle_norm *= w_db;
-
         if (fabsf(steering_angle_rad) >= vector_angle_max_rad) {
+            limit.steer_right = true;
+            limit.steer_left = true;
+        }
+        // deadband freeze: output is pinned to the remembered angle and the
+        // demanded angle is not reaching the servo, so any steering error the
+        // PID integrates now cannot be actuated — hold the I-term too
+        if (w_db < 0.01f) {
             limit.steer_right = true;
             limit.steer_left = true;
         }
