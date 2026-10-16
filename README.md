@@ -12,7 +12,7 @@
 
 Three layered features on top of upstream Rover:
 
-1. **Current/wind drift estimation & compensation** — two independent estimators (nav-source while driving, loiter-source while holding position) feed crab-angle/speed corrections into Auto, Guided and Loiter, with per-source gains, age-weighted seeding across mode switches, and a kill-switch at gain=0.
+1. **Current/wind drift estimation & compensation** — two independent estimators (nav-source while driving, loiter-source while holding position) feed crab-angle/speed corrections into Auto, Guided and Loiter, with per-source gains applied once at write-time (all stored estimates are post-gain), age-weighted seeding across mode switches, dual-window nav sampling (8 s fast + 20 s authoritative) with disagreement-streak escalation, and a kill-switch at gain=0.
 2. **Steering thrust floor + throttle management** — guarantees minimum thrust whenever a large heading correction is commanded, so a vectored thruster always has authority; plus cosine throttle reduction and speed-PID I-freeze during pivot turns.
 3. **Vectored-thrust angle blending** — blends direct and atan-based steering-angle computation based on filtered throttle, with hysteresis deadband.
 
@@ -207,6 +207,12 @@ if (!nav_has_real &&
 
 `DRIFT_SEED_MIN_AGE_MS = 50` (`mode.h`) blocks same-tick echo (Guided::_enter → start_loiter → ModeLoiter::_enter). Seeded sources are deliberately accepted so bridge `LOITER_WP_RESET` bounces (Guided→Loiter→Guided in ~1.5 s) don't cold-start the nav estimator — the loiter window almost never completes in that window.
 
+### 4.3a Dual-window estimator + disagree streak (commit `78b28bcb`)
+
+The nav estimator runs two parallel windows: a short `DRIFT_EST_SHORT_WINDOW_S = 8 s` window and the authoritative `DRIFT_EST_WINDOW_S = 20 s` window (`mode.h:197-198`). The short window produces the first usable estimate ~8 s after a window start instead of 20 s, at lower SNR; its samples pass the `DRIFT_EST_DISAGREE_GATE_MPS = 0.75 m/s` gate (post-gain domain, compared against the stored nav slot — including seeded values, deliberately, as conservative damping of the least-trustworthy first sample after a mode change).
+
+Consecutive gate failures raise `_drift_est_disagree_streak` and step the blend from 25 % to 50 % — a persistent environment change (wind shift, river current) is adopted in ~16-24 s instead of ~80+ s, while a single noisy window still moves the estimate only 25 %. The streak saturates (`MIN(+1, 255)`), resets on agreement, on long-window completion, and on empty-slot writes. The long window keeps its own gated 25 % blend and additionally primes/resets the streak. Window constants are compile-time in `mode.h`, not GCS params — changing them requires a rebuild.
+
 ### 4.4 `calc_throttle` — cosine reduction, drift FF, steering floor, I-freeze
 
 Order of operations in the vectored-thrust + heading-fresh block:
@@ -269,7 +275,7 @@ The world-frame memory of current lives in the drift estimator (NE coordinates),
 
 ### 4.5 `mode.h` additions
 
-New members: `_steer_floor_active`, `_steering_heading_active_ms`, `_drift_rising_count`, `_drift_zero_count`, `_drift_i_filt`/`_drift_i_filt_valid`, `_inside_loiter_circle`, `_throttle_nav_pct`; constants `DRIFT_SEED_MIN_AGE_MS`, `LOITER_DRIFT_RISING_TICKS`, `LOITER_DRIFT_ZERO_TICKS=5`; helpers `update_drift_estimator`, `apply_drift_compensation`, `get_drift_compensation_body`, `calc_steering_to_heading`, `start_loiter` (Guided), `get_speed_thr_expo` accessor.
+New members: `_steer_floor_active`, `_steering_heading_active_ms`, `_drift_rising_count`, `_drift_zero_count`, `_drift_i_filt`/`_drift_i_filt_valid`, `_inside_loiter_circle`, `_throttle_nav_pct`, `_drift_est_short_predicted_disp_ne_m`, `_drift_est_short_pos_start_ne_m`, `_drift_est_short_start_ms`, `_drift_est_disagree_streak`; constants `DRIFT_SEED_MIN_AGE_MS`, `DRIFT_EST_SHORT_WINDOW_S`, `LOITER_DRIFT_RISING_TICKS`, `LOITER_DRIFT_ZERO_TICKS=5`; helpers `update_drift_estimator`, `apply_drift_compensation`, `get_drift_compensation_body`, `calc_steering_to_heading`, `start_loiter` (Guided), `get_speed_thr_expo` accessor.
 
 ### 4.6 `Mode::set_steering` — `(int16_t)` overflow wrap (FIXED)
 

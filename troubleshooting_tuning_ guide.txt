@@ -1,4 +1,3 @@
-PRACOVNA VERZIA ZATIAL NEREVIDOVANA NEPOUZIVAT AKO ZDROJ INFORMACII
 ========================================================================
 VECTORED-THRUST ROVER — TUNING & TROUBLESHOOTING GUIDE
 branch rover-4.7-custom, allocator = MOT_VEC_FOSSEN=1
@@ -229,6 +228,28 @@ DRIFT_EST_YR [deg/s, default 15]
   Sprísnený yaw rate gate pre nav/G guided drift estimator.
   Musí byť < LOIT_ROT_RAT (estimator potrebuje čistšie okná).
 
+LOIT_I_ALPHA — poznámka: hodnota je clampovaná na 0-1 pri čítaní;
+  param mimo rozsah sa už nemôže pokaziť (divergovať) filter — ale
+  mimo-rozsahovú hodnotu nastavenú cez GCS radšej oprav, nech to
+  nezamaskuje chybu v zdroji parametru.
+
+DRIFT ESTIMÁTOR — časová škála (compile-time konštanty, NIE
+parametre — zmena vyžaduje rebuild; definované v Rover/mode.h):
+- Nav estimátor beží v DVOCH paralelných oknách: krátke ~8 s a
+  dlhé ~20 s. Prvá vzorka driftu po štarte/prepnutí príde po ~8 s
+  (predtým to bolo 20 s). Dlhé okno píše autoritatívnu hodnotu,
+  krátke okno umožní rýchlu adaptáciu počas jeho behu.
+- Streak eskalácia: ak sa nové vzorky opakovane nesúhlasia s
+  uloženým odhadom, blend sa zvyšuje 25 % → 50 % — trvalá zmena
+  prúdu/vetra sa adoptuje ~3x rýchlejšie; jednorazový výstrelek
+  ostáva brzdený na 25 %. Neničitelné, hardwired.
+- Zero-decay v Loiteri: ak PID I-term klesne pod LOIT_I_MIN,
+  odhad sa zmenšuje ×0.75 každých LOITER_DRIFT_ZERO_TICKS tickov
+  (exponenciálny zánik k nule, nie okamžitý). Aktualizuje aj
+  časovú značku — nameraná nula je živá vzorka, nie stale.
+- EKF reset/GPS glitch invaliduje OBE okná aj streak — po resete
+  počítaj ~8 s do prvej novej vzorky.
+
 VZÁJOMNÉ VZŤAHY drift parametrov:
 - LOIT_ROT_RAT > DRIFT_EST_YR vždy (estimator je konzervatívnejší)
 - LOIT_CST_THR a sliding prahe (stop_speed, 2*stop_speed band,
@@ -236,6 +257,9 @@ VZÁJOMNÉ VZŤAHY drift parametrov:
   tesne, metody nikdy nevzorkuju a DRIFT_G_* nemaju co skalovat
 - DRIFT_MAXAGE chráni celý subsystém — ak je 0, všetko ostatné
   je mŕtve nezávisle od ostatných hodnôt
+- Disagreement gate prahy (LOIT_I_DISAG pre loiter, absolútny
+  DRIFT_EST_DISAGREE pre nav) bežia v post-gain doméne — meníš-li
+  DRIFT_G_*, gate sa chová konzistentne; žiadne prerážkanie
 
 ------------------------------------------------------------------------
 LEGACY PARAMETRE — aktívne len pri VEC_FOSSEN=0
@@ -324,6 +348,23 @@ TROUBLESHOOTING — symptóm → pravdepodobná príčina → čo kontrolovať
     b) lock sa cyklicky re-aktivuje (throttle jde cez VEC_BRK
        vetvu, nie pivot) → skontroluj VEC_BRK ladenie
     c) vyššie vrstvy: motor limit flags, disarm, failsafe
+
+"Drift odhad sa adaptuje pomaly na skutočnú zmenu vetra/prúdu"
+  → Krátke okno (~8 s) píše prvý odhad; pri trvalej nesúhlase
+    streak eskaluje blend na 50 % — celková konvergencia ~16-24 s.
+    Ak trvá výrazne dlhšie: DRIFT_EST_YR gate môže vzorky zahodiť
+    (loď sa moc vrtí), alebo dlhé okno prepisuje odhad naspäť.
+  → Krátke/dlhé okno a streak NIE sú parametre — zmena = rebuild
+    (Rover/mode.h konštanty DRIFT_EST_*_WINDOW_S).
+  → Ak odhad skáče nekonzistentne: DRIFT_EST_DISAGREE prah (const)
+    alebo LOIT_I_DISAG (loiter) je príliš tesný voči realite.
+
+"Loiter odhad klesá k nule hoci drift stále existuje"
+  → Zero-decay vetva: PID I-term pod LOIT_I_MIN sa číta ako
+    "žiadny drift" a odhad sa zmenšuje ×0.75 iteratívne. Ak loď
+    drží pozíciu aj bez velkého I (napr. po správnom seede z nav),
+    je to správne. Ak odhad zaniká nesprávne → LOIT_I_MIN znížiť,
+    alebo overiť či sliding/standstill gate metódy 2 vzorkuje.
 
 ========================================================================
 CHECKLIST pred prvým water testom po ladení
