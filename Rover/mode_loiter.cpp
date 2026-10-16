@@ -150,7 +150,9 @@ void ModeLoiter::update()
                 Vector2f prev_ne;
                 const float gain_loit = g2.motors.get_drift_comp_gain_loiter();
                 Vector2f sample_scaled = sample_ne * gain_loit;
-                if (g2.motors.get_current_estimate_ne(prev_ne)) {
+                uint32_t est_age_ms;
+                bool est_seeded;
+                if (g2.motors.get_loiter_estimate_ne(prev_ne, est_age_ms, est_seeded) && !est_seeded) {
                     const Vector2f dv = sample_scaled - prev_ne;
                     if (dv.length() > g2.motors.get_loit_i_disagree() * MAX(prev_ne.length(), 0.1f)) {
                         sample_scaled = prev_ne + dv * 0.25f;
