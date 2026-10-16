@@ -698,6 +698,11 @@ void Mode::update_drift_estimator(float commanded_heading_cd, float commanded_sp
         bool seeded_s = false;
         Vector2f to_store_s = drift_short_ms;
         if (g2.motors.get_nav_estimate_ne(current_ne_s, age_s, seeded_s)) {
+            // gate runs against a seeded value too (post-gain, same domain) -
+            // conservative damping of the first sample after a mode change is
+            // intentional: the freshest post-change window is also the least
+            // trustworthy. unlike the loiter gate, the seed is NOT skipped here
+            // because the nav slot is both source and target of the correction
             const Vector2f drift_scaled_s = drift_short_ms * gain_nav_s;
             const float disagree_s = (drift_scaled_s - current_ne_s).length();
             if (disagree_s > DRIFT_EST_DISAGREE_GATE_MPS) {
@@ -707,6 +712,11 @@ void Mode::update_drift_estimator(float commanded_heading_cd, float commanded_sp
             } else {
                 _drift_est_disagree_streak = 0;
             }
+        } else {
+            // empty slot: symmetric with the long window below - a streak must
+            // not prime the next window to step 50% against a first-fill sample
+            // that nothing has validated yet
+            _drift_est_disagree_streak = 0;
         }
         g2.motors.set_nav_estimate_ne(to_store_s);
 
