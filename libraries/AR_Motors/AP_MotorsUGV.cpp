@@ -1432,6 +1432,19 @@ void AP_MotorsUGV::clear_omni_motors(int8_t motor_num)
 // output to regular steering and throttle channels
 void AP_MotorsUGV::output_regular(bool armed, float ground_speed, float steering, float throttle, float dt)
 {
+    // vectored allocator state must not survive a disarm: while disarmed the
+    // allocator never runs, so clear its memory here so a re-arm starts clean
+    if (!armed) {
+        _vec_last_steering_angle_rad = 0.0f;
+        _vec_pivot_coast_ms         = 0;
+        _vec_rot_brake_active       = false;
+        _vec_rot_brake_angle_rad    = 0.0f;   // locked angle má zmysel len počas brake
+        _vec_rot_brake_cnt          = 0;      // debounce counter — 3-tick hysteresis by po re-arme mohla dostať head-start
+        _vec_folded                 = false;  // fold hysteresis — bez resetu prvý tick po re-arme môže začať foldnutý
+        _vec_throttle_filt          = 0.0f;
+        _vec_steering_filt          = 0.0f;
+    }
+
     // output to throttle channels
     if (armed) {
         if (_scale_steering) {
