@@ -49,7 +49,7 @@ if (!is_zero(throttle_scaler_inv)) {
 
 **Physics:** `throttle` is the commanded *forward* thrust component. The boost guarantees the commanded forward component `T·cos(θ) = throttle` is deliverable — `T = throttle/cos(θ)` — which simultaneously makes the lateral component `T·sin(θ) = throttle·tan(θ)` large enough to turn the boat at speed. Without it, the boat loses steering authority exactly when moving fast. The 1/cos spike near 90° is intentional (see §10).
 
-`MOT_VEC_DEADBAND` freezes `_vec_last_steering_angle_rad` when both steering and throttle demands are near zero — prevents servo hunting. `_vec_resid_tc` sets the EMA time constant on `_vec_throttle_filt` so the blend weight doesn't chatter with throttle noise.
+`MOT_VEC_DEADBAND` freezes `_vec_last_steering_angle_rad` when both steering and throttle demands are near zero — prevents servo hunting. The gate variable is `vec_mag` = magnitude of the filtered (steering, throttle) demand vector, i.e. *demand loudness*, not an angle error — the frozen value is simply whatever angle the allocator last output. In the Fossen path the same parameter has a **second, load-bearing role**: it is the `vec_mag >= VEC_DEADBAND` latch guard on the rotation-brake trigger and side-flip coast trigger (§11). With `VEC_BLND_THR > 0` the output-freeze part is largely redundant (the atan-blend already drives the angle toward ~0 at quiet demand), but setting `VEC_DEADBAND = 0` also removes the latch guards — a single noisy tick could then latch the brake on garbage `atan2` output. Keep it small, not zero. `_vec_resid_tc` sets the EMA time constant on `_vec_throttle_filt` so the blend weight doesn't chatter with throttle noise.
 
 ### 2.2 Drift estimator state store
 
@@ -453,7 +453,7 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | `VEC_BLD_STRT` | AP_MotorsUGV | 70.0 deg | steering angle below which throttle is pure surge/yaw geometric decomposition (`VEC_YAW_EXP` has zero effect) |
 | `YAW_CRS_RATE` | AP_MotorsUGV | 16.0 deg/s | reference pivot yaw rate calibrating pivot-mode throttle, analogous to `SPEED_CRUISE`; paired with `YAW_CRS_THR` |
 | `YAW_CRS_THR` | AP_MotorsUGV | 49.0 % | throttle required to sustain `YAW_CRS_RATE` in pivot mode, analogous to `THR_CRUISE`; shaped by `VEC_YAW_EXP` for other turn rates |
-| `VEC_TRN_MS` | AP_MotorsUGV | 800 ms | servo-transit throttle suppression window after a yaw-agreement brake release or a demanded-side flip from saturation; covers the servo sweep +-90deg through center so no thrust lands through intermediate angles; set from measured full-to-full servo transit time, 0 disables suppression |
+| `VEC_TRN_MS` | AP_MotorsUGV | 800 ms | servo-transit throttle suppression window after a yaw-agreement brake release or a demanded-side flip from saturation; covers the servo sweep +-90deg through center so no thrust lands through intermediate angles; set from measured full-to-full servo transit time, 0 disables suppression; **clamped to 0-3000 ms** in `sanity_check_parameters()` and at the use-site — out-of-range values cannot produce a long dead-throttle window |
 
 ---
 
@@ -484,6 +484,10 @@ This section documents decisions made during the vectored-thrust allocator rewor
 | Method-2 estimator blind spot | error gate removed — replaced by stationary (`\|v\| ≤ stop_speed`) / sliding (`\|v\| ≤ 2·stop_speed`, distance rising `LOITER_DRIFT_RISING_TICKS` ticks) windows + `!rotating` + `!in_transit` gates; sliding with no measurable direction skips the write instead of thrust-vector fallback (would give the opposite direction); zero-branch gated by `!sliding` so low-I sliding doesn't corrode the estimate; `LOIT_I_EQERR` deprecated |
 | `VEC_BRK` `@Description` comment | corrected — current code uses `\|n\| * VEC_BRK * VEC_BRK_ASYM`; old `\|yaw rate\|/16deg/s + 0.8` formula no longer exists |
 | Speed-PID I-freeze hold-vs-decay | reviewed — current hold-or-decay is **correct**, see §4.4 |
+| `VEC_TRN_MS` range enforcement | hardened — value is now clamped to 0-3000 ms both in `sanity_check_parameters()` (writes back to the param so GCS shows the corrected value) and at the use-site in `vectored_allocate()`. Previously an out-of-range write via mavlink/param-file bypassed the `@Range` GCS hint and could pin throttle at 0 for tens of seconds after every pivot — a water-test killer |
+| Deadband freeze vs steering I-term | hardened — when `w_db < 0.01` (demand fully inside deadband, output pinned to `_vec_last_steering_angle_rad`) the allocator now also sets `limit.steer_left/right`, so the steering-rate PID holds I via the same mechanism as a saturation lock. Previously I could integrate an unactuatable error during a brief mid-sweep freeze (bounded by `ATC_STR_RAT_IMAX`, self-healing, but producing a visible rudder tug on demand return). Rot-brake lock was already covered implicitly — the locked angle always sits at `±ANGLEMAX`, which trips the same saturation flags |
+| Allocator state across disarm | hardened — `output_regular()` clears `_vec_last_steering_angle_rad`, `_vec_pivot_coast_ms`, `_vec_rot_brake_active` and the two demand filters while `!armed`. Previously a brake lock or coast window active at disarm moment survived into the next armed session (state lives in the motor object, only written inside the allocator which never runs disarmed) |
+| Per-session throttle/steering state in `Mode::enter()` | hardened — `_steering_heading_active_ms`, `_steer_floor_active` and `_throttle_nav_pct` are now cleared on mode entry alongside the existing drift-window resets. Previously a re-entered mode could read a one-tick-stale coast-gate snapshot or a stale 75 ms heading-freshness window from the previous session |
 
 ### Closed by decision / tuning — no code needed
 
