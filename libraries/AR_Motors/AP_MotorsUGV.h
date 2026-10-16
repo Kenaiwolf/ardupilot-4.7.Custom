@@ -387,8 +387,8 @@ private:
       3 reversal handling structures, for k_throttle, k_throttleLeft and k_throttleRight
      */
     struct ReverseThrottle {
-        float last_throttle;
-        uint32_t last_output_ms;
+        float last_throttle = 0.0f;
+        uint32_t last_output_ms = 0;
 
         // output with delay for reversal
         void output(SRV_Channel::Function function, float throttle, float delay);
