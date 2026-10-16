@@ -195,6 +195,7 @@ protected:
 
     // drift estimator shared by all modes via navigate_to_waypoint() and Guided
     static constexpr float DRIFT_EST_WINDOW_S = 20.0f;           // window length (s)
+    static constexpr float DRIFT_EST_SHORT_WINDOW_S = 8.0f;      // short parallel window (s) - fast but noisier, feeds streak-gated writes
     // DRIFT_EST_MAX_YAW_RATE_DPS moved to MOT_DRIFT_EST_YAWR parameter (tunable via GCS)
     static constexpr uint32_t DRIFT_EST_MAX_GAP_MS = 200; // max tick gap before window is stale
     static constexpr uint32_t DRIFT_SEED_MIN_AGE_MS = 50; // min age (ms) a source estimate must have before it can be used to seed another mode's estimate
@@ -206,6 +207,14 @@ protected:
     uint32_t _drift_est_last_update_ms = 0;    // last integrator update time
     bool     _drift_est_window_valid = false;  // false if any gate failed during current window
     uint32_t _drift_est_ekf_reset_ms = 0;      // timestamp of last EKF NE reset at window start
+
+    // short parallel window: same predicted-vs-actual math, shorter horizon.
+    // its samples go through the disagreement gate with streak escalation;
+    // the long window remains the authoritative slow write
+    Vector2f _drift_est_short_predicted_disp_ne_m;
+    Vector2p _drift_est_short_pos_start_ne_m;
+    uint32_t _drift_est_short_start_ms = 0;
+    uint8_t  _drift_est_disagree_streak = 0;   // consecutive gated disagreements
 
     // performs a controlled stop. returns true once vehicle has stopped
     bool stop_vehicle();

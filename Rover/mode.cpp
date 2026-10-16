@@ -642,6 +642,9 @@ void Mode::update_drift_estimator(float commanded_heading_cd, float commanded_sp
         _drift_est_last_update_ms = now_ms;
         _drift_est_actual_pos_start_ne_m = current_pos_ne;
         _drift_est_predicted_disp_ne_m.zero();
+        _drift_est_short_start_ms = now_ms;
+        _drift_est_short_pos_start_ne_m = current_pos_ne;
+        _drift_est_short_predicted_disp_ne_m.zero();
         Vector2f pos_shift_ne;
         _drift_est_ekf_reset_ms = ahrs.getLastPosNorthEastReset(pos_shift_ne);
         _drift_est_window_valid = true;
@@ -653,6 +656,8 @@ void Mode::update_drift_estimator(float commanded_heading_cd, float commanded_sp
     if (!gate_ok) {
         _drift_est_window_valid = false;
         _drift_est_window_start_ms = 0;
+        _drift_est_short_start_ms = 0;
+        _drift_est_disagree_streak = 0;
         return;
     }
 
@@ -663,6 +668,8 @@ void Mode::update_drift_estimator(float commanded_heading_cd, float commanded_sp
         ((now_ms - _drift_est_last_update_ms) > DRIFT_EST_MAX_GAP_MS)) {
         _drift_est_window_valid = false;
         _drift_est_window_start_ms = 0;
+        _drift_est_short_start_ms = 0;
+        _drift_est_disagree_streak = 0;
         return;
     }
 
@@ -672,8 +679,44 @@ void Mode::update_drift_estimator(float commanded_heading_cd, float commanded_sp
     const float heading_rad = radians(commanded_heading_cd * 0.01f);
     _drift_est_predicted_disp_ne_m.x += cosf(heading_rad) * commanded_speed_ms * dt;
     _drift_est_predicted_disp_ne_m.y += sinf(heading_rad) * commanded_speed_ms * dt;
+    _drift_est_short_predicted_disp_ne_m.x += cosf(heading_rad) * commanded_speed_ms * dt;
+    _drift_est_short_predicted_disp_ne_m.y += sinf(heading_rad) * commanded_speed_ms * dt;
 
-    // window not finished yet
+    // short window complete: gated write with disagree-streak escalation.
+    // consecutive disagreements mean the environment persistently changed -
+    // step faster (25% then 50%); a single noisy window still only moves 25%.
+    // comparisons run post-gain; the write converts back since
+    // set_nav_estimate_ne() applies the gain itself
+    if ((now_ms - _drift_est_short_start_ms) >= uint32_t(DRIFT_EST_SHORT_WINDOW_S * 1000.0f)) {
+        const Vector2f short_actual_ne_m = (current_pos_ne - _drift_est_short_pos_start_ne_m).tofloat();
+        const float short_window_s = (now_ms - _drift_est_short_start_ms) * 0.001f;
+        const Vector2f drift_short_ms = (short_actual_ne_m - _drift_est_short_predicted_disp_ne_m) / short_window_s;
+
+        const float gain_nav_s = g2.motors.get_drift_comp_gain_nav();
+        Vector2f current_ne_s;
+        uint32_t age_s = 0;
+        bool seeded_s = false;
+        Vector2f to_store_s = drift_short_ms;
+        if (g2.motors.get_nav_estimate_ne(current_ne_s, age_s, seeded_s)) {
+            const Vector2f drift_scaled_s = drift_short_ms * gain_nav_s;
+            const float disagree_s = (drift_scaled_s - current_ne_s).length();
+            if (disagree_s > DRIFT_EST_DISAGREE_GATE_MPS) {
+                const float frac = (_drift_est_disagree_streak >= 1) ? 0.5f : 0.25f;
+                _drift_est_disagree_streak = MIN(_drift_est_disagree_streak + 1, 255);
+                to_store_s = (current_ne_s + (drift_scaled_s - current_ne_s) * frac) / MAX(gain_nav_s, 0.01f);
+            } else {
+                _drift_est_disagree_streak = 0;
+            }
+        }
+        g2.motors.set_nav_estimate_ne(to_store_s);
+
+        // restart short window from here
+        _drift_est_short_start_ms = now_ms;
+        _drift_est_short_pos_start_ne_m = current_pos_ne;
+        _drift_est_short_predicted_disp_ne_m.zero();
+    }
+
+    // long window not finished yet
     if ((now_ms - _drift_est_window_start_ms) < uint32_t(DRIFT_EST_WINDOW_S * 1000.0f)) {
         return;
     }
@@ -700,9 +743,18 @@ void Mode::update_drift_estimator(float commanded_heading_cd, float commanded_sp
         const float disagreement = (drift_scaled - current_ne).length();
         if (disagreement > DRIFT_EST_DISAGREE_GATE_MPS) {
             // don't discard outright - the environment may genuinely have changed -
-            // but only move a fraction of the way towards the new sample this time
+            // but only move a fraction of the way towards the new sample this time.
+            // a disagreeing long-window sample also primes the streak so the next
+            // short-window sample already steps at 50%
+            _drift_est_disagree_streak = MIN(_drift_est_disagree_streak + 1, 255);
             drift_to_store = (current_ne + (drift_scaled - current_ne) * 0.25f) / MAX(gain_nav, 0.01f);
+        } else {
+            _drift_est_disagree_streak = 0;
         }
+    } else {
+        // empty slot: nothing to disagree with, streak must not survive a
+        // first-fill window
+        _drift_est_disagree_streak = 0;
     }
 
     // gain (DRIFT_GAIN_NAV) is already applied inside set_nav_estimate_ne()
