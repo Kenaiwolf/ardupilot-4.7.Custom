@@ -277,6 +277,10 @@ void ModeLoiter::update()
             if (!meas_dir_ne.is_zero()) {
                 est_dir_ne = meas_dir_ne;
                 Vector2f prev_ne;
+                // get_current_estimate_ne is intentional here (unlike the
+                // disagreement gate below): a nav-sourced estimate is a
+                // legitimate direction prior - it only blends the heading,
+                // never writes into the loiter slot
                 if (g2.motors.get_current_estimate_ne(prev_ne) &&
                     prev_ne.length_squared() > sq(0.01f)) {
                     // prev direction is a prior with weight 0.65, fresh measurement
@@ -297,11 +301,19 @@ void ModeLoiter::update()
             if (!est_dir_ne.is_zero()) {
                 // scale the new sample into the stored (post-gain) domain
                 // BEFORE the disagreement gate - prev_ne from
-                // get_current_estimate_ne already has the gain applied
+                // get_loiter_estimate_ne already has the gain applied
                 Vector2f new_est = est_dir_ne * drift_mag_mps * g2.motors.get_drift_comp_gain_loiter();
                 // NAV-style disagreement gate: don't jump to a very different
-                // estimate in one shot, blend a fraction of the way
-                if (g2.motors.get_current_estimate_ne(prev_ne)) {
+                // estimate in one shot, blend a fraction of the way.
+                // gate against the LOITER slot only - get_current_estimate_ne()
+                // could return the nav slot and the blend would write a
+                // nav-derived value into the loiter slot as a real measurement.
+                // seeded-only loiter value is skipped: a real sample outranks
+                // the seed prior, so the gate does not damp it
+                uint32_t est_age_ms;
+                bool est_seeded;
+                if (g2.motors.get_loiter_estimate_ne(prev_ne, est_age_ms, est_seeded) &&
+                    !est_seeded) {
                     const Vector2f dv = new_est - prev_ne;
                     if (dv.length() > g2.motors.get_loit_i_disagree() * MAX(prev_ne.length(), 0.1f)) {
                         new_est = prev_ne + dv * 0.25f;
