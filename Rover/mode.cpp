@@ -693,12 +693,15 @@ void Mode::update_drift_estimator(float commanded_heading_cd, float commanded_sp
     Vector2f drift_to_store = drift_ne_ms;
     uint32_t unused_age_ms = 0;
     bool unused_is_seeded = false;
+    const float gain_nav = g2.motors.get_drift_comp_gain_nav();
+    // compare in post-gain domain: current_ne already has DRIFT_GAIN_NAV applied
     if (g2.motors.get_nav_estimate_ne(current_ne, unused_age_ms, unused_is_seeded)) {
-        const float disagreement = (drift_ne_ms - current_ne).length();
+        const Vector2f drift_scaled = drift_ne_ms * gain_nav;
+        const float disagreement = (drift_scaled - current_ne).length();
         if (disagreement > DRIFT_EST_DISAGREE_GATE_MPS) {
             // don't discard outright - the environment may genuinely have changed -
             // but only move a fraction of the way towards the new sample this time
-            drift_to_store = current_ne + (drift_ne_ms - current_ne) * 0.25f;
+            drift_to_store = (current_ne + (drift_scaled - current_ne) * 0.25f) / MAX(gain_nav, 0.01f);
         }
     }
 

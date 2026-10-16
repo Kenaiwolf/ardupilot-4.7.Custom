@@ -144,16 +144,20 @@ void ModeLoiter::update()
                     sample_ne -= ahrs.body_to_earth2D(ff_body);
                 }
 
-                // same disagreement gate as method-2 (:285): a single noisy EKF
-                // velocity sample must not jump the drift estimate in one tick
+                // disagreement gate in the stored (post-gain) domain:
+                // prev_ne from get_current_estimate_ne already has the gain
+                // applied, so scale the raw sample up before comparing
                 Vector2f prev_ne;
+                const float gain_loit = g2.motors.get_drift_comp_gain_loiter();
+                Vector2f sample_scaled = sample_ne * gain_loit;
                 if (g2.motors.get_current_estimate_ne(prev_ne)) {
-                    const Vector2f dv = sample_ne - prev_ne;
+                    const Vector2f dv = sample_scaled - prev_ne;
                     if (dv.length() > g2.motors.get_loit_i_disagree() * MAX(prev_ne.length(), 0.1f)) {
-                        sample_ne = prev_ne + dv * 0.25f;
+                        sample_scaled = prev_ne + dv * 0.25f;
                     }
                 }
-                g2.motors.set_loiter_estimate_ne(sample_ne);
+                // back to pre-gain - set_loiter_estimate_ne re-applies the gain
+                g2.motors.set_loiter_estimate_ne(sample_scaled / MAX(gain_loit, 0.01f));
             }
         }
 
@@ -301,7 +305,9 @@ void ModeLoiter::update()
                         new_est = prev_ne + dv * 0.25f;
                     }
                 }
-                g2.motors.set_loiter_estimate_ne(new_est);
+                // new_est is in post-gain domain (scaled on :295) - convert
+                // back so set_loiter_estimate_ne does not apply gain twice
+                g2.motors.set_loiter_estimate_ne(new_est / MAX(g2.motors.get_drift_comp_gain_loiter(), 0.01f));
             }
         } else if (pid_in_equilibrium_window && !sliding) {
             // meracie okno platne ale |I| pod sumovym prahom = drift sa realne
@@ -312,14 +318,21 @@ void ModeLoiter::update()
             // nulovu vzorku - bez nej by sa stary odhad "zasekol" az do
             // DRIFT_MAXAGE ked vietor/prud zhasne
             if (++_drift_zero_count >= LOITER_DRIFT_ZERO_TICKS) {
+                // decay the LOITER slot only - get_current_estimate_ne() could
+                // return a nav-sourced value and we must not decay another
+                // source's estimate. decay operates post-gain internally (no
+                // gain round-trip). a genuinely-measured nonzero estimate wins
+                // the decay path; anything else gets a real zero written -
+                // including a stale seed, which a measured zero outranks
                 Vector2f prev_ne;
-                Vector2f zero_est{0.0f, 0.0f};
-                if (g2.motors.get_current_estimate_ne(prev_ne) && !prev_ne.is_zero()) {
-                    // disagreement-blend aj pri ceste k nule, rovnako ako pri
-                    // normalnych vzorkach - nie skokovy reset
-                    zero_est = prev_ne * 0.75f;
+                uint32_t age_ms;
+                bool seeded;
+                if (g2.motors.get_loiter_estimate_ne(prev_ne, age_ms, seeded) &&
+                    !seeded && !prev_ne.is_zero()) {
+                    g2.motors.decay_loiter_estimate(0.75f);
+                } else {
+                    g2.motors.set_loiter_estimate_ne(Vector2f{0.0f, 0.0f});
                 }
-                g2.motors.set_loiter_estimate_ne(zero_est);
             }
             _drift_i_filt_valid = false;
         } else {
