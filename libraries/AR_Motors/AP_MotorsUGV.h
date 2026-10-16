@@ -163,6 +163,18 @@ public:
     // code can compute its own age-based handoff weighting
     float get_drift_max_age_s() const { return _drift_max_age_s; }
 
+    // per-source calibration gains, read-time constrained to the same range
+    // the setters use - needed by mode code to compare new raw samples against
+    // the stored post-gain estimate in the same domain
+    float get_drift_comp_gain_loiter() const { return constrain_float(_drift_comp_gain_loiter, 0.0f, 2.0f); }
+    float get_drift_comp_gain_nav()    const { return constrain_float(_drift_comp_gain_nav, 0.0f, 2.0f); }
+
+    // post-gain decay of the loiter slot - multiplies the STORED value
+    // directly (no gain round-trip through the setter). refreshes the
+    // timestamp on purpose: a decayed value is a live "measured zero"
+    // sample, not a stale placeholder
+    void decay_loiter_estimate(float factor);
+
     // true when the unified allocator (VEC_FOSSEN=1) handles vectored thrust;
     // mode-level legacy patches (e.g. steering floor) must not run on top of it
     bool use_vec_fossen() const { return _vec_fossen > 0; }

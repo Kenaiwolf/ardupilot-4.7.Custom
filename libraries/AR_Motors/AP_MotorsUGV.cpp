@@ -397,6 +397,16 @@ void AP_MotorsUGV::set_loiter_estimate_ne(const Vector2f &drift_ne)
     _loiter_estimate_is_seeded = false;
 }
 
+// post-gain decay of the loiter slot - operates on the stored (already
+// gain-corrected) value, so no gain round-trip is needed. the timestamp is
+// refreshed deliberately: decay represents a live "drift is zeroing"
+// measurement, not a stale estimate
+void AP_MotorsUGV::decay_loiter_estimate(float factor)
+{
+    _loiter_estimate_ne *= constrain_float(factor, 0.0f, 1.0f);
+    _loiter_estimate_ms = AP_HAL::millis();
+}
+
 // set a Guided-sourced current+wind drift estimate (m/s, North/East).  gain
 // (DRIFT_G_NAV) applied here, at write-time, so the stored
 // value is already the final, PID-ready corrected vector
