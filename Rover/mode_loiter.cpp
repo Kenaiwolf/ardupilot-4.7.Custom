@@ -310,6 +310,7 @@ void ModeLoiter::update()
                 // nav-derived value into the loiter slot as a real measurement.
                 // seeded-only loiter value is skipped: a real sample outranks
                 // the seed prior, so the gate does not damp it
+                Vector2f prev_ne;
                 uint32_t est_age_ms;
                 bool est_seeded;
                 if (g2.motors.get_loiter_estimate_ne(prev_ne, est_age_ms, est_seeded) &&
