@@ -118,6 +118,14 @@ public:
     // get throttle/speed controller maximum deceleration
     float get_decel_max() const;
 
+    // get speed-dependent acceleration limit in m/s/s for the given speed (m/s).
+    // linear decay from _throttle_accel_max at v=0 to zero at _throttle_accel_veq; falls back to constant _throttle_accel_max when _throttle_accel_veq is zero
+    float get_accel_max_at_speed(float speed) const;
+
+    // get speed-dependent deceleration limit in m/s/s for the given speed (m/s).
+    // quadratic curve _throttle_decel_v2*speed^2 + _throttle_decel_min, multiplied by _throttle_decel_brake_mult when braking; falls back to get_decel_max() when _throttle_decel_v2 is zero
+    float get_decel_max_at_speed(float speed, bool braking) const;
+
     // check if speed controller active
     bool speed_control_active() const;
 
@@ -158,6 +166,10 @@ private:
     AP_Float _throttle_accel_max;   // speed/throttle control acceleration (and deceleration) maximum in m/s/s.  0 to disable limits
     AP_Float _throttle_decel_max;    // speed/throttle control deceleration maximum in m/s/s. 0 to use ATC_ACCEL_MAX for deceleration
     AP_Float _speed_thr_expo;       // speed->throttle curve exponent. 1.0 = linear (default), >1.0 = concave curve typical for boats
+    AP_Float _throttle_accel_veq;   // equilibrium speed (m/s) for speed-dependent acceleration limit. 0 = constant limit
+    AP_Float _throttle_decel_v2;    // quadratic coefficient of speed-dependent deceleration limit. 0 = constant limit
+    AP_Float _throttle_decel_min;   // minimum deceleration floor for the quadratic deceleration curve (m/s/s)
+    AP_Float _throttle_decel_brake_mult; // multiplier of deceleration curve when braking with reversed output (ATC_BRAKE=1)
     AP_Int8  _brake_enable;         // speed control brake enable/disable. if set to 1 a reversed output to the motors to slow the vehicle.
     AP_Float _stop_speed;           // speed control stop speed.  Motor outputs to zero once vehicle speed falls below this value
     AP_Float _steer_accel_max;      // steering angle acceleration max in deg/s/s

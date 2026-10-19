@@ -582,6 +582,40 @@ const AP_Param::GroupInfo AR_AttitudeControl::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("_SPD_EXPO", 17, AR_AttitudeControl, _speed_thr_expo, 1.0f),
 
+    // @Param: _ACC_VEQ
+    // @DisplayName: Speed control equilibrium speed
+    // @Description: Equilibrium speed at full throttle in m/s - the speed where propeller thrust equals hydrodynamic drag and acceleration is zero. When set above zero, the acceleration limit applied to the desired-speed ramp varies linearly with speed: full ATC_ACCEL_MAX at 0 m/s, decaying to zero at this speed. This models boat physics where acceleration is highest from standstill and vanishes near hull equilibrium speed. 0 disables the curve (constant ATC_ACCEL_MAX limit as before).
+    // @Range: 0.0 10.0
+    // @Increment: 0.05
+    // @Units: m/s
+    // @User: Advanced
+    AP_GROUPINFO("_ACC_VEQ", 18, AR_AttitudeControl, _throttle_accel_veq, 1.50f),
+
+    // @Param: _DEC_V2
+    // @DisplayName: Speed control quadratic deceleration coefficient
+    // @Description: Quadratic coefficient of the coasting deceleration curve in m/s/s per (m/s)^2. When set above zero, the deceleration limit applied to the desired-speed ramp becomes DEC_V2*speed^2 + DEC_MIN instead of the constant ATC_DECEL_MAX. This models hydrodynamic drag which grows with the square of speed. 0 disables the curve (constant ATC_DECEL_MAX limit as before).
+    // @Range: 0.0 1.0
+    // @Increment: 0.005
+    // @User: Advanced
+    AP_GROUPINFO("_DEC_V2", 19, AR_AttitudeControl, _throttle_decel_v2, 0.07f),
+
+    // @Param: _DEC_MIN
+    // @DisplayName: Speed control minimum deceleration
+    // @Description: Minimum deceleration in m/s/s used by the quadratic deceleration curve (ATC_DEC_V2) and by stopping distance planning. Pure coasting drag approaches zero at low speed and the vehicle never fully stops, so this floor keeps the planner finite. Only used when ATC_DEC_V2 is non-zero.
+    // @Range: 0.0 1.0
+    // @Increment: 0.005
+    // @Units: m/s/s
+    // @User: Advanced
+    AP_GROUPINFO("_DEC_MIN", 20, AR_AttitudeControl, _throttle_decel_min, 0.02f),
+
+    // @Param: _DEC_BRK
+    // @DisplayName: Speed control braking deceleration multiplier
+    // @Description: Multiplier applied to the coasting deceleration curve (ATC_DEC_V2*speed^2 + ATC_DEC_MIN) when braking with reversed motor output (requires ATC_BRAKE=1). Values above 1.0 model reverse propeller thrust adding to hydrodynamic drag. 1.0 = same as coasting, 0 is treated as 1.0. Only used when ATC_DEC_V2 is non-zero.
+    // @Range: 0.0 5.0
+    // @Increment: 0.1
+    // @User: Advanced
+    AP_GROUPINFO("_DEC_BRK", 21, AR_AttitudeControl, _throttle_decel_brake_mult, 2.0f),
+
     AP_GROUPEND
 };
 
@@ -716,9 +750,9 @@ float AR_AttitudeControl::get_steering_out_rate(float desired_rate, bool motor_l
     }
 
     // update pid to calculate output to motors
-    float output = _steer_rate_pid.update_all(_desired_turn_rate, AP::ahrs().get_yaw_rate_earth(), dt, (motor_limit_left || motor_limit_right));  
-    output += _steer_rate_pid.get_ff();  
-    // constrain and return final output  
+    float output = _steer_rate_pid.update_all(_desired_turn_rate, AP::ahrs().get_yaw_rate_earth(), dt, (motor_limit_left || motor_limit_right));
+    output += _steer_rate_pid.get_ff();
+    // constrain and return final output
     return constrain_float(output, -1.0f, 1.0f);
 }
 
@@ -1031,6 +1065,34 @@ float AR_AttitudeControl::get_decel_max() const
     }
 }
 
+// get speed-dependent acceleration limit in m/s/s for the given speed (m/s)
+float AR_AttitudeControl::get_accel_max_at_speed(float speed) const
+{
+    const float accel_max = MAX(_throttle_accel_max, 0.0f);
+    if (!is_positive(_throttle_accel_veq)) {
+        // feature disabled, constant limit as before
+        return accel_max;
+    }
+    // linear decay from accel_max at v=0 to zero at v=_throttle_accel_veq
+    return MAX(accel_max * (1.0f - fabsf(speed) / _throttle_accel_veq), 0.0f);
+}
+
+// get speed-dependent deceleration limit in m/s/s for the given speed (m/s)
+float AR_AttitudeControl::get_decel_max_at_speed(float speed, bool braking) const
+{
+    if (!is_positive(_throttle_decel_v2)) {
+        // feature disabled, constant limit as before
+        return get_decel_max();
+    }
+    // quadratic coasting drag curve plus floor so the planner stays finite near zero speed
+    float decel = _throttle_decel_v2 * sq(speed) + MAX(_throttle_decel_min, 0.0f);
+    if (braking && _brake_enable && is_positive(_throttle_decel_brake_mult)) {
+        // reversed motor output adds thrust to hydrodynamic drag
+        decel *= _throttle_decel_brake_mult;
+    }
+    return decel;
+}
+
 // check if speed controller active
 bool AR_AttitudeControl::speed_control_active() const
 {
@@ -1071,12 +1133,15 @@ float AR_AttitudeControl::get_desired_speed_accel_limited(float desired_speed, f
         get_forward_speed(speed_prev);
     }
 
-    // acceleration limit desired speed
+    // acceleration/deceleration limit desired speed.
+    // speed-dependent curves are evaluated at the current desired speed
     float speed_change_max;
-    if (fabsf(desired_speed) < fabsf(_desired_speed) && is_positive(_throttle_decel_max)) {
-        speed_change_max = _throttle_decel_max * dt;
+    if (fabsf(desired_speed) < fabsf(_desired_speed)) {
+        // slowing down: deceleration curve, reversed-output braking when enabled
+        speed_change_max = get_decel_max_at_speed(_desired_speed, true) * dt;
     } else {
-        speed_change_max = _throttle_accel_max * dt;
+        // speeding up: acceleration curve
+        speed_change_max = get_accel_max_at_speed(_desired_speed) * dt;
     }
     return constrain_float(desired_speed, speed_prev - speed_change_max, speed_prev + speed_change_max);
 }
@@ -1084,10 +1149,31 @@ float AR_AttitudeControl::get_desired_speed_accel_limited(float desired_speed, f
 // get minimum stopping distance (in meters) given a speed (in m/s)
 float AR_AttitudeControl::get_stopping_distance(float speed) const
 {
+    if (is_zero(speed)) {
+        return 0.0f;
+    }
+
+    // with the quadratic deceleration curve integrate the real curve numerically,
+    // because the constant-decel approximation underestimates the distance at low speed
+    if (is_positive(_throttle_decel_v2)) {
+        const float step = 0.05f;   // integration step in m/s
+        float dist = 0.0f;
+        for (float v = fabsf(speed); v > 0.0f; v -= step) {
+            const float v_mid = MAX(v - 0.5f * step, 0.0f);
+            const float decel = get_decel_max_at_speed(v_mid, true);
+            if (decel <= 0.0f) {
+                break;
+            }
+            // distance to lose this speed slice: d += v*dv/decel (midpoint)
+            dist += v_mid * MIN(step, v) / decel;
+        }
+        return dist;
+    }
+
     // get maximum vehicle deceleration
     const float decel_max = get_decel_max();
 
-    if ((decel_max <= 0.0f) || is_zero(speed)) {
+    if (decel_max <= 0.0f) {
         return 0.0f;
     }
 
