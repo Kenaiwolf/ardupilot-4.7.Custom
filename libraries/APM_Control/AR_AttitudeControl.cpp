@@ -602,7 +602,7 @@ const AP_Param::GroupInfo AR_AttitudeControl::var_info[] = {
     // @Param: _DEC_MIN
     // @DisplayName: Speed control minimum deceleration
     // @Description: Minimum deceleration in m/s/s used by the quadratic deceleration curve (ATC_DEC_V2) and by stopping distance planning. Pure coasting drag approaches zero at low speed and the vehicle never fully stops, so this floor keeps the planner finite. Only used when ATC_DEC_V2 is non-zero.
-    // @Range: 0.0 1.0
+    // @Range: 0.005 1.0
     // @Increment: 0.005
     // @Units: m/s/s
     // @User: Advanced
@@ -1085,7 +1085,9 @@ float AR_AttitudeControl::get_decel_max_at_speed(float speed, bool braking) cons
         return get_decel_max();
     }
     // quadratic coasting drag curve plus floor so the planner stays finite near zero speed
-    float decel = _throttle_decel_v2 * sq(speed) + MAX(_throttle_decel_min, 0.0f);
+    // floor is enforced at a minimum of 0.005 m/s/s - a true zero floor makes
+    // get_stopping_distance() diverge (integrand ~1/v) even though the ramp is finite
+    float decel = _throttle_decel_v2 * sq(speed) + MAX(_throttle_decel_min, 0.005f);
     if (braking && _brake_enable && is_positive(_throttle_decel_brake_mult)) {
         // reversed motor output adds thrust to hydrodynamic drag
         decel *= _throttle_decel_brake_mult;
