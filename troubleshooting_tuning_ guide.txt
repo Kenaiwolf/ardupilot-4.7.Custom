@@ -103,11 +103,50 @@ SEKCIA 1 — PARAMETER MAPA (meno | co robi | default | smer ladenia)
 | MOT_REV_DELAY       | oneskorenie reverzu [ms]                | 0  | drz 0 (audit F11) |
 | MOT_THST_EXPO       | tvar throttle->tah krivky               | 0  | standard, mimo guide |
 | MOT_THST_ASYM       | fwd/rev ucinnost                        | 1.0| standard, mimo guide |
-| THR_CRUISE/CRUISE_SPEED/ATC_SPD_* | speed tuning      | —  | upstream guide |
-| ATC_STR_RAT_* PID   | steering PID                            | —  | upstream guide |
+| THR_CRUISE/CRUISE_SPEED/ATC_SPD_* | speed tuning               | —  | upstream guide |
+|| ATC_STR_RAT_* PID   | steering PID                            | —  | upstream guide |
+|| ATC_ACCEL_MAX       | accel pri v=0 [m/s2] (a0 krivky)        | 0.30| NOVY VYZNAM: nie konstanta, len vrchol |
+|| ATC_ACC_VEQ         | rovnovazna rychlost pri plnom plyne [m/s]| 1.50| namerana maximalna rychlost |
+|| ATC_DEC_V2          | kvadraticky koef. coast brzdy           | 0.07| z logu COAST fit; 0=legacy konstanta |
+|| ATC_DEC_MIN         | podlaha planovania zastavky [m/s2]      | 0.02| nikdy 0 pri DEC_V2>0 |
+|| ATC_DEC_BRK         | nasobic reverznej brzdy x coast         | 2.0 | len ak ATC_BRAKE=1 |
+|| ATC_DECEL_MAX       | fallback decel pri DEC_V2=0             | 0.054| nenulovat — fallback hodnota |
 Konstanty DRIFT_EST_* (okna ~8 s/~20 s, streak, zero-decay prahy,
 LOITER_DRIFT_*_TICKS): NELADITELNE na vode — definovane v
 Rover/mode.h, zmena = rebuild. V krokoch len ako kontext.
+
+------------------------------------------------------------------------
+FAZA A2 — speed accel/decel krivky (surge dynamika)
+------------------------------------------------------------------------
+[KROK] A2.1/ATC_ACC_VEQ rovnovazna rychlost
+CO:    Nastavit na nameranu maximalnu rychlost pri plnom plyne.
+AKO:   Manual, plny plyn z pokoja, casom rychlost dobehne na plateau
+       (~25 s). Plateau hodnota = ACC_VEQ.
+LIMIT: Musi byt > CRUISE_SPEED, inak demand nikdy nedosiahne ciel.
+ROZHOD: Zapisane -> A2.2.
+
+[KROK] A2.2/ATC_ACCEL_MAX = a0
+CO:    Zrychlenie pri v~0 pri plnom plyne.
+AKO:   Z logu: dv/dt v prvej sekunde po plnom plyne. Odhad z ocami:
+       0.3 je konzervativne, nedoladovat bez logu.
+LIMIT: Prilis vysoke = demand bezi rychlejsie nez lod -> PID saturacia.
+ROZHOD: -> A2.3.
+
+[KROK] A2.3/ATC_DEC_V2 coast brzda
+CO:    Kvadraticky koeficient plavby narazom.
+AKO:   Manual: rozbehni ~1.2 m/s, plyn na 0, meraj cas zastavenia.
+       Z krivky: DEC_V2 sa ladi tak, aby Loiter zastavil bez prestrelu
+       aj bez nadcenia. Prestrelenie -> DEC_V2 +0.01. Zastavenie prilis
+       skoro (lod sa taha) -> -0.01.
+LIMIT: Pri 0 sa prepne na legacy konstantu ATC_DECEL_MAX.
+ROZHOD: -> A2.4.
+
+[KROK] A2.4/ATC_DEC_BRK reverzna brzda
+CO:    Nasobic coast krivky pocas aktivnej brzdy (ATC_BRAKE=1).
+AKO:   Loiter z ~1 m/s: lod zastavi vyrazne pred cielom -> DEC_BRK
+       prilis nizky (+0.5). Prestreli -> DEC_V2 je chyba, nie BRK.
+LIMIT: Rozsah 1-4. Pri 1.0 = reverz nerovnany (nekonzervativne).
+ROZHOD: -> FAZA B.
 
 ------------------------------------------------------------------------
 FAZA B — pivot krivka (Acro, staticke otacanie)
@@ -283,6 +322,15 @@ Format: co vidis ocami/v MP -> presna akcia.
   -> E3 test vzorkovania -> gatovat CST_THR/I_MIN
   -> loď rotuje pocas loiter -> E4 gaty
 
+"Loiter/Auto prestreli ciel a vracia sa"
+  -> DEC_V2 prilis nizky (planovana draha kratsia nez realita) -> +0.01
+  -> DEC_MIN = 0 pri DEC_V2>0 -> nastav 0.02
+  -> ACC_VEQ < CRUISE_SPEED? -> oprav na namerane maximum
+
+"Rozbeh demandu pomaly / throttle sleduje az po sekundach"
+  -> ACCEL_MAX stale 0.0675 -> nastav 0.30 (novy vyznam = a0)
+  -> PID I-lag pri rozbehu -> ladenie FF->P->I, nie krivka
+
 "Slabe/agresivne brzdenie dopredu"
   -> VEC_BRK_ASYM plati aj pre linear brake -> C2
 
@@ -320,6 +368,8 @@ LOIT_I_MIN=0.02, LOIT_I_ALPHA=0.10, LOIT_I_DISAG=0.5,
 LOIT_ROT_ANG=15, LOIT_ROT_RAT=20, DRIFT_EST_YR=15,
 ATC_STR_ACC_MAX=45, ATC_STR_DEC_MAX=45, MOT_SLEWRATE=100,
 MOT_REV_DELAY=0.
+ATC_ACCEL_MAX=0.30, ATC_ACC_VEQ=1.50, ATC_DEC_V2=0.07,
+ATC_DEC_MIN=0.02, ATC_DEC_BRK=2.0, ATC_DECEL_MAX=0.054.
 Ostatne (ATC_STR_RAT_*, ATC_SPD_*, THR_CRUISE): upstream default.
 
 ========================================================================
@@ -346,5 +396,7 @@ CHECKLIST pred prvym water testom (vsetko cez MP Full Parameter List)
 [ ] YAW_CRS_RATE/YAW_CRS_THR = namerane B1/B2 hodnoty
 [ ] VEC_BRK doladeny C1 (dobeh < 1 otocka, bez oscilacie)
 [ ] ATC_STR_ACC_MAX=ATC_STR_DEC_MAX=45
+[ ] ATC_ACCEL_MAX=0.30 (nie legacy 0.0675!), ACC_VEQ=namerane max,
+    DEC_V2=0.07, DEC_MIN=0.02, DEC_BRK=2.0
 [ ] DRIFT_G_LOIT=1.0, DRIFT_G_NAV=1.0, DRIFT_MAXAGE=1800
 [ ] MP tuning graf: yawrate, ch1out, ch3out aktivne

@@ -126,6 +126,25 @@ Boats have quadratic drag — a linear FF underestimates thrust at low speed rat
 
 **Important for estimation:** the same `powf(ratio, expo)` curve is the basis for loiter method-2's inverse mapping (I-term → equivalent speed) and the drift feed-forward — one parameter governs all three, keeping them consistent.
 
+### 3.1a Speed-dependent accel/decel limits (`ATC_ACC_VEQ`, `ATC_DEC_V2`, `ATC_DEC_MIN`, `ATC_DEC_BRK`)
+
+Stock Rover ramps `desired_speed` with constant `ACCEL_MAX`/`DECEL_MAX` and plans stops with the same constant. A displacement hull violates both assumptions by an order of magnitude (measured: ~0.3 m/s² at v=0 decaying to ~0 at the thrust–drag equilibrium, vs ~0.005 m/s² coast deceleration at low speed). A single constant either under-drives the ramp or — worse — makes `get_stopping_distance()` plan a stop the hull cannot perform, which is the observed Loiter overshoot.
+
+The desired-speed ramp and stopping-distance planner now evaluate speed-dependent curves instead:
+
+accel_eff(v) = ACCEL_MAX * (1 - |v| / ACC_VEQ) [linear thrust margin]
+decel_eff(v) = DEC_V2 * v^2 + DEC_MIN [quadratic hull drag]
+(* DEC_BRK when ATC_BRAKE=1 applies reverse thrust)
+
+
+- `ACC_VEQ` = measured equilibrium (max) speed at full throttle. `accel_eff → 0` there, matching physics; above it the curve goes slightly negative, which is correct (the hull slows toward equilibrium on its own).
+- `DEC_V2·v²` matches measured coast deceleration (`k ≈ 0.07` on the reference hull). `DEC_MIN` is a planning floor — pure coast never fully stops, so without it `get_stopping_distance()` diverges.
+- `DEC_BRK` scales the coast curve during active braking (`ATC_BRAKE=1`); measured reverse braking is ~2–3× coast.
+- **Fallback:** `ACC_VEQ=0` restores constant `ACCEL_MAX`; `DEC_V2=0` restores constant `DECEL_MAX` (including its `0 → accel_max` branch). All four params at 0 = bit-identical legacy behavior.
+- **Semantic change:** `ACCEL_MAX` is now `a(0)` — the peak of the curve, not a flat rate. A legacy value (e.g. 0.0675) left in place after flashing produces an almost-stalled speed ramp.
+- Both callers share the same helper (`get_accel_max_at_speed`/`get_decel_max_at_speed` in `AR_AttitudeControl.cpp`), so the planner and the ramp cannot disagree. Stopping distance integrates the curve numerically (~0.05 m/s steps).
+- Not related to `ATC_SPD_EXPO` — expo shapes the steady-state throttle FF; these params shape the *transient* speed-demand ramp and stopping plan. They do not need re-tuning when CRUISE_* changes, only when the hull/propulsion changes.
+
 ### 3.2 Throttle-limit flag plumbing
 
 `get_throttle_out_speed` / `get_throttle_out_stop` already took `motor_limit_low`/`motor_limit_high`; the fork OR's `steer_i_freeze` into both at the call site (`mode.cpp:352-356`). Inside, all four collapse to one bool:
@@ -435,6 +454,10 @@ Slim Rover build for a low-flash FC: ~470 feature `undef`s plus explicit `define
 | `MOT_VEC_DEADBAND` | AP_MotorsUGV | 0.03 | steering deadband, freezes last angle |
 | `MOT_VEC_RESID_TC` | AP_MotorsUGV | 0.5 s | throttle filter TC for blend weight |
 | `ATC_SPD_EXPO` | AR_AttitudeControl | 1.0 | speed↔throttle curve exponent (shared by FF, method-2, clamp) |
+| `ATC_ACC_VEQ` | AR_AttitudeControl | 0 (off) | equilibrium speed for linear accel curve `ACCEL_MAX·(1−v/VEQ)`; 0 = legacy constant `ACCEL_MAX` |
+| `ATC_DEC_V2` | AR_AttitudeControl | 0 (off) | quadratic coast-decel coefficient (`DEC_V2·v²`); 0 = legacy constant `DECEL_MAX` |
+| `ATC_DEC_MIN` | AR_AttitudeControl | 0.02 | planning floor on the decel curve — keeps `get_stopping_distance()` finite (pure coast never stops) |
+| `ATC_DEC_BRK` | AR_AttitudeControl | 1.0 | multiplier on the decel curve while `ATC_BRAKE=1` applies reverse thrust; measured ~2–3× coast |
 | `DRIFT_GAIN_NAV` / `DRIFT_GAIN_LOIT` | AP_MotorsUGV | 1.0 | write-time gains; both 0 = full kill-switch |
 | `DRIFT_MAXAGE` | AP_MotorsUGV | 1800 s | shared staleness cutoff; 0 = never trust |
 | `MOT_DRIFT_EST_YAWR` | AP_MotorsUGV | 15 °/s | nav estimator yaw-rate gate; 0 = off |
