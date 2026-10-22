@@ -707,16 +707,21 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // dead-throttle on every pivot from rest. now:
         // |yaw_rate| > ~0.5deg/s AND sign-opposed to n, for 3 consecutive
         // ticks (~60ms at 50Hz), rejecting single-sample gyro noise and
-        // hull-wobble sign oscillation around zero. release stays on
-        // n*yaw_rate >= 0: entry needs 3 opposed ticks, exit needs 1
-        // agreeing tick - asymmetric hysteresis against chatter. n flipping
-        // sign releases implicitly: during lock yaw opposes the old n, so
-        // after the flip it agrees with the new n (product >= 0)
+        // hull-wobble sign oscillation around zero.
+        // RELEASE is tied to yaw_rate COLLAPSING (see below), NOT to n/
+        // yaw_rate agreement: the brake's only job is killing the overshoot
+        // it is currently fighting. the old n*yaw_rate>=0 release meant a
+        // mid-lock sign flip of n toward the SAME side as the ongoing
+        // (wrong-direction) rotation counted as "release" - and since
+        // throttle sign below used to follow n too, that combination let the
+        // brake actively accelerate the wrong-direction rotation instead of
+        // fighting it. this produced a full 360deg wrong-direction pivot in
+        // the field. entry (3 opposed ticks) is unchanged.
         const bool rot_brake_cond =
             vec_mag >= _vec_deadband &&
             fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
             fabsf(n) > 0.05f &&
-            fabsf(yaw_rate_rads) > radians(0.5f) &&
+            fabsf(yaw_rate_rads) > radians(5.0f) &&
             (is_positive(yaw_rate_rads) != is_positive(n));
 
         if (rot_brake_cond) {
@@ -747,19 +752,19 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             // overshoot. yaw_rate_rads is the authoritative side indicator
             _vec_rot_brake_angle_rad = copysignf(vector_angle_max_rad, yaw_rate_rads);
         } else if (_vec_rot_brake_active &&
-                   ((n * yaw_rate_rads) >= 0.0f || fabsf(fx) > 0.03f)) {
-            // release on EITHER: (a) measured rotation agrees with commanded
-            // direction again - including implicitly after n changes sign,
-            // since during the lock yaw opposed the old n and therefore
-            // agrees with the new one - or (b) forward/aft
-            // demand (fx) has reappeared - pivot has ended, atan2(n,fx) no
-            // longer sits at/near the +-90deg envelope, so re-triggering the
-            // instant this clears is not possible. fx=0.03 is a wide margin:
-            // even at n=1 it already pulls delta to ~88 deg, well clear of
-            // the vector_angle_max_rad-1e-4 trigger threshold. deliberately
-            // instantaneous - no hysteresis/filter on this fx check, since a
-            // real fx demand reappearing means the PID needs the angle back
-            // immediately, and lock-release delay is the larger risk here
+                   (fabsf(yaw_rate_rads) <= radians(3.0f) || fabsf(fx) > 0.03f)) {
+            // release on EITHER: (a) the overshoot the brake was fighting has
+            // actually collapsed - |yaw_rate| back under HALF the 0.5deg/s
+            // entry threshold (hysteresis so it doesn't chatter right at the
+            // entry line). this is deliberately independent of n/n's sign:
+            // n can flip mid-lock (pilot/controller now also wants the
+            // wrong-side rotation to continue) and that must NOT be read as
+            // "job done" - or (b) forward/aft demand (fx) has reappeared -
+            // pivot has ended, atan2(n,fx) no longer sits at/near the
+            // +-90deg envelope, so re-triggering the instant this clears is
+            // not possible. fx=0.03 is a wide margin: even at n=1 it already
+            // pulls delta to ~88 deg, well clear of the
+            // vector_angle_max_rad-1e-4 trigger threshold.
             _vec_rot_brake_active = false;
 			_vec_rot_brake_cnt = 0;  // stale count during the lock would bypass
                                      // the debounce on re-entry (angle stays
@@ -778,8 +783,18 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         if (_vec_rot_brake_active) {
             steering_angle_rad = _vec_rot_brake_angle_rad;
             const float brake_scale = MAX(_vec_brk_pct, 0.0f) * 0.01f;  // negative param must never flip the brake into forward thrust
+            // brake_frac MAGNITUDE still scales with |n| (more commanded
+            // effort -> proportionally more counter-thrust), but the THRUST
+            // SIGN must be fixed to the locked angle's side, never to n: n
+            // can flip sign mid-lock, and if thrust sign followed it, the
+            // "brake" would start pushing WITH the real (wrong-direction)
+            // rotation instead of against it - this was the root cause of
+            // the observed 360deg wrong-direction pivot. reverse thrust
+            // through _vec_rot_brake_angle_rad (set from yaw_rate_rads at
+            // lock time, i.e. the real overshoot side) always opposes the
+            // actual rotation regardless of what n does while locked.
             const float brake_frac = fabsf(n) * brake_scale;
-            throttle_norm = copysignf(brake_frac * brk_asym, n);
+            throttle_norm = copysignf(brake_frac * brk_asym, -_vec_rot_brake_angle_rad);
         }
 
         // servo-transit suppression: for VEC_TRN_MS after a yaw-agreement
