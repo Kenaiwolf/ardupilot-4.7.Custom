@@ -188,26 +188,16 @@ void AR_PosControl::update(float dt)
     // rotate acceleration into body frame using current heading
     const Vector2f accel_target_FR = AP::ahrs().earth_to_body2D(_accel_target);
 
-    // calculate minimum turn speed which is the max speed the vehicle could turn through the corner
-    // given the vehicle's turn radius and half its max lateral acceleration
-    // todo: remove MAX of zero when safe_sqrt fixed
-    float turn_speed_min = MAX(safe_sqrt(_atc.get_turn_lat_accel_max() * 0.5 * _turn_radius), 0);
-
     // rotate target velocity from earth-frame to body frame
     const Vector2f vel_target_FR = AP::ahrs().earth_to_body2D(_vel_target);
 
-    // desired speed is normally the forward component (only) of the target velocity
-    float des_speed = vel_target_FR.x;
-    if (!stopping) {
-        // do not let target speed fall below the minimum turn speed unless the vehicle is slowing down
-        const float abs_des_speed_min = MIN(_vel_target.length(), turn_speed_min);
-        if (_reversed != backing_up) {
-            // if reversed or backing up desired speed will be negative
-            des_speed = MIN(-abs_des_speed_min, vel_target_FR.x);
-        } else {
-            des_speed = MAX(abs_des_speed_min, vel_target_FR.x);
-        }
-    }
+    // NOTE: minimum-turn-speed floor removed for this fork (vectored-thrust boat,
+    // not a wheeled rover) - desired speed now always equals the commanded
+    // forward-back velocity target without being raised to a "physically necessary"
+    // cornering minimum. _turn_radius / ATC_TURN_MAX_G are left untouched and may
+    // still be used elsewhere (e.g. ModeCircle::check_config_speed()); _turn_radius
+    // itself becomes an unused private member of AR_PosControl after this change.
+    const float des_speed = vel_target_FR.x;
     _desired_speed = _atc.get_desired_speed_accel_limited(des_speed, dt);
 
     // calculate turn rate from desired lateral acceleration
