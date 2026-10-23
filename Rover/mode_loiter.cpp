@@ -378,8 +378,12 @@ void ModeLoiter::update()
         yaw_error_cd = wrap_180_cd(_desired_yaw_cd - ahrs.yaw_sensor);
 
         // reduce desired speed if yaw_error is large
-        // 45deg of error reduces speed to 75%, 90deg of error reduces speed to 50%
-        float yaw_error_ratio = 1.0f - constrain_float(fabsf(yaw_error_cd / 9000.0f), 0.0f, 1.0f) * 0.5f;
+        // scale linearly to zero at 90deg error - beyond 90deg any forward
+        // component only moves the vehicle away from the target, so there is
+        // no reason to retain a speed floor (unlike the old 180deg ramp,
+        // which assumed a reverse-toward-destination branch that LOIT_TYPE=1
+        // never takes - see lines 369-373)
+        float yaw_error_ratio = 1.0f - constrain_float(fabsf(yaw_error_cd / 9000.0f), 0.0f, 1.0f);
         _desired_speed *= yaw_error_ratio;
     }
 
