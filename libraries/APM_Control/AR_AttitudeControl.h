@@ -51,6 +51,12 @@ public:
     // calculate the turn rate in rad/sec given a lateral acceleration (in m/s/s) and speed (in m/s)
     float get_turn_rate_from_lat_accel(float lat_accel, float speed) const;
 
+    // returns max turn rate (rad/s) as a function of forward speed (m/s), fitted
+    // from measured on-water data for this fork's vectored-thrust hull. Used only
+    // by get_steering_out_rate() to cap _desired_turn_rate; independent of
+    // ATC_TURN_MAX_G / get_turn_lat_accel_max().
+    float get_turn_rate_max_for_speed(float speed) const;
+
     // get the lateral acceleration limit (in m/s/s).  Returns at least 0.1G or approximately 1 m/s/s
     float get_turn_lat_accel_max() const { return MAX(_turn_lateral_G_max, 0.1f) * GRAVITY_MSS; }
 

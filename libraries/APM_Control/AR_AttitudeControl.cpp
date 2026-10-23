@@ -735,11 +735,13 @@ float AR_AttitudeControl::get_steering_out_rate(float desired_rate, bool motor_l
         _desired_turn_rate = constrain_float(_desired_turn_rate, -steer_rate_max_rad, steer_rate_max_rad);
     }
 
-    // G limit based on speed
+    // turn-rate ceiling based on fitted speed->max_turn_rate curve for this
+    // fork's hull (ATC_TURN_MAX_G is no longer read at this call site; it
+    // remains active elsewhere, e.g. ModeCircle, Mode::calc_steering_from_lateral_acceleration, AR_WPNav)
     float speed;
     if (get_forward_speed(speed)) {
         // do not limit to less than 1 deg/s
-        const float turn_rate_max = MAX(get_turn_rate_from_lat_accel(get_turn_lat_accel_max(), fabsf(speed)), radians(1.0f));
+        const float turn_rate_max = MAX(get_turn_rate_max_for_speed(fabsf(speed)), radians(1.0f));
         if (_desired_turn_rate <= -turn_rate_max) {
             _steering_limit_left = true;
         }
@@ -785,6 +787,16 @@ bool AR_AttitudeControl::get_lat_accel(float &lat_accel) const
     }
     lat_accel = speed * AP::ahrs().get_yaw_rate_earth();
     return true;
+}
+
+// returns max turn rate (rad/s) as a function of forward speed (m/s)
+// fitted logistic curve for this fork's vectored-thrust boat hull, from measured
+// on-water sustained-turn data: ~20 deg/s flat at low speed, falling smoothly
+// toward higher speeds. NOTE: if expf is unresolved at build time, verify
+// <math.h>/<cmath> is reachable via this file's includes.
+float AR_AttitudeControl::get_turn_rate_max_for_speed(float speed) const
+{
+    return radians(20.0f / (1.0f + expf(6.70f * (speed - 1.44f))));
 }
 
 // calculate the turn rate in rad/sec given a lateral acceleration (in m/s/s) and speed (in m/s)
