@@ -153,8 +153,8 @@ void AR_PosControl::update(float dt)
     _vel_target.limit_length(get_speed_max());
 
     // Limit the velocity to prevent fence violations
-    bool backing_up = false;
 #if AP_AVOIDANCE_ENABLED
+    bool backing_up = false;
     AC_Avoid *avoid = AP::ac_avoid();
     if (avoid != nullptr) {
         Vector3f vel_3d_cms{_vel_target.x * 100.0f, _vel_target.y * 100.0f, 0.0f};
