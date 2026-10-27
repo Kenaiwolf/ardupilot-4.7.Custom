@@ -20,6 +20,7 @@
 #include <AP_BattMonitor/AP_BattMonitor.h>
 #include <AP_Scheduler/AP_Scheduler.h>
 #include <AP_AHRS/AP_AHRS.h>
+#include <APM_Control/AR_AttitudeControl.h>
 
 #define SERVO_MAX 4500  // This value represents 45 degrees and is just an arbitrary representation of servo max travel.
 
@@ -629,14 +630,24 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         const float w = sq(sinf(angle_ratio * M_PI_2));
         const float pivot_expo = MAX(_vec_yaw_lin_expo, 1.0f);
         float t_pivot;
+        // cruise-model feedforward for pivot throttle: scale the calibrated
+        // curve by demanded turn rate (YAW_CRS_THR maps YAW_CRS_RATE deg/s,
+        // 49% -> 16deg/s; ratio uncapped above 1 -> demand past the
+        // calibration point stretches the curve, e.g. 20deg/s ->
+        // 0.49*1.25^expo), not |n| which saturates at 1 and pinned
+        // achievable rate at ~YAW_CRS_RATE (observed ~11-17deg/s plateau at
+        // 20deg/s demand). get_desired_turn_rate() is the already-capped
+        // value (speed-fitted turn-rate curve limits it upstream in
+        // get_steering_out_rate) and returns 0 after 500ms of no controller
+        // calls; |n| fallback keeps thrust nonzero while the I-term still
+        // holds n up mid-pivot.
+        const AR_AttitudeControl *att = AR_AttitudeControl::get_singleton();
+        const float des_rate_dps = (att != nullptr) ?
+            degrees(att->get_desired_turn_rate()) : 0.0f;
+        float t_pivot;
         if (is_positive(_yaw_crs_rate_dps) && is_positive(_yaw_crs_thr_pct)) {
-            // rate_ratio: n is already a normalized [-1,1] fraction of full
-            // yaw demand (constrained above), so n=1 IS the YAW_CRS_RATE
-            // calibration point by definition - no unit conversion needed.
-            // (previous version incorrectly divided n by _yaw_crs_rate_dps,
-            // a deg/s value, collapsing rate_ratio toward ~0 even at n=1
-            // and effectively defeating the YAW_CRS_THR ceiling)
-            const float rate_ratio = fabsf(n);
+            const float rate_ratio = is_positive(fabsf(des_rate_dps)) ?
+                fabsf(des_rate_dps) / _yaw_crs_rate_dps : fabsf(n);
             t_pivot = copysignf((_yaw_crs_thr_pct * 0.01f) * powf(rate_ratio, pivot_expo), n);
         } else {
             t_pivot = vec_mag;
@@ -814,7 +825,6 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             // lock time, i.e. the real overshoot side) always opposes the
             // actual rotation regardless of what n does while locked.
             const float brake_frac = fabsf(n) * brake_scale;
-            // thrust sign follows the LOCKED angle side, not its negation:
             // copysignf(frac, -angle) produced FORWARD thrust through the
             // -90deg locked stop, which the log confirmed as ~99% forward
             // (matches brake_frac*brk_asym = 0.80*1.24, unreachable via the
