@@ -579,7 +579,15 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // same VEC_BLND_THR threshold/mechanism as the legacy blend, now
         // applied inside the Fossen allocator instead of being unavailable
         float direct_angle_rad = constrain_float(_vec_steering_filt, -1.0f, 1.0f) * vector_angle_max_rad;
-        if (is_negative(_vec_throttle_filt)) {
+        // single flip authority: both w_lowthr blend inputs must follow the
+        // FOLD decision, not fx_filt<0. previously direct flipped the moment
+        // filtered throttle went negative while atan folded only past
+        // |delta|>92deg (hysteresis back at 88deg) - in those two desync
+        // windows the blend mixed +90 with -90 and swept steering_angle_rad
+        // through zero, producing meaningless sign and cancelling thrust.
+        // _vec_folded is already latched (no chatter) and is the same state
+        // the atan side and the t_pivot pair-sign below key off.
+        if (_vec_folded) {
             direct_angle_rad = -direct_angle_rad;
         }
         float w_lowthr;
@@ -632,6 +640,18 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             t_pivot = copysignf((_yaw_crs_thr_pct * 0.01f) * powf(rate_ratio, pivot_expo), n);
         } else {
             t_pivot = vec_mag;
+        }
+        // fold pair-consistency: fold transforms the (angle, thrust) PAIR,
+        // not just the angle. copysignf(mag, n) pairs forward thrust with
+        // the demanded (pre-fold) side; if fold flipped the commanded angle
+        // to the opposite stop, thrust must flip to reverse so the torque
+        // sign(angle)*sign(thrust) still equals sign(n). uses the final
+        // blended angle so it stays correct through any blend weight.
+        // |n| guard: below it the pivot term is negligible anyway and the
+        // sign product can hit -0.0 filter noise (steering_angle tiny
+        // negative with n==0 flips vec_mag reverse for a forward demand).
+        if (fabsf(n) > 0.01f) {
+            t_pivot *= copysignf(1.0f, steering_angle_rad * n);
         }
         throttle_norm = t_vector * (1.0f - w) + t_pivot * w;
 
@@ -754,9 +774,9 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         } else if (_vec_rot_brake_active &&
                    (fabsf(yaw_rate_rads) <= radians(3.0f) || fabsf(fx) > 0.03f)) {
             // release on EITHER: (a) the overshoot the brake was fighting has
-            // actually collapsed - |yaw_rate| back under HALF the 0.5deg/s
-            // entry threshold (hysteresis so it doesn't chatter right at the
-            // entry line). this is deliberately independent of n/n's sign:
+            // actually collapsed - |yaw_rate| back under 3deg/s, below the
+            // 5deg/s entry threshold (hysteresis so it doesn't chatter right
+            // at the entry line). this is deliberately independent of n/n's sign:
             // n can flip mid-lock (pilot/controller now also wants the
             // wrong-side rotation to continue) and that must NOT be read as
             // "job done" - or (b) forward/aft demand (fx) has reappeared -
@@ -794,7 +814,17 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             // lock time, i.e. the real overshoot side) always opposes the
             // actual rotation regardless of what n does while locked.
             const float brake_frac = fabsf(n) * brake_scale;
-            throttle_norm = copysignf(brake_frac * brk_asym, -_vec_rot_brake_angle_rad);
+            // thrust sign follows the LOCKED angle side, not its negation:
+            // copysignf(frac, -angle) produced FORWARD thrust through the
+            // -90deg locked stop, which the log confirmed as ~99% forward
+            // (matches brake_frac*brk_asym = 0.80*1.24, unreachable via the
+            // 49% t_pivot ceiling) while TurnRate deepened to -24deg/s. the
+            // brake was accelerating the overshoot, not fighting it.
+            // reverse thrust through the locked angle always produces
+            // torque -sign(angle) = -sign(yaw_rate): counter-rotation on
+            // BOTH lock sides. sign(+-angle) variants are each wrong on
+            // one side - only the magnitude matters, sign is fixed.
+            throttle_norm = -fabsf(brake_frac * brk_asym);
         }
 
         // servo-transit suppression: for VEC_TRN_MS after a yaw-agreement
