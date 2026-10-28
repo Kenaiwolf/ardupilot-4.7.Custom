@@ -686,42 +686,12 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             throttle_norm *= brk_asym;
         }
 
-        // rotation brake (Option B, angle-locked): flipping the angle to the
-        // opposite side while the hull is still overshooting the commanded
-        // rotation is the actual failure mode this guards against - a ~15kg
-        // thruster traversing ~1.5s under full load, at the exact moment a
-        // fast corrective reaction is needed, is a net-negative response.
-        // instead: the instant the measured yaw rate opposes the commanded
-        // direction (n) while at/near full deflection, LOCK steering_angle_rad
-        // at its current value - immune to the atan2/direct-angle blend above
-        // and to whatever the steering PID asks for - and brake with reverse
-        // thrust proportional to |n| alone. n (not an approximated rad/s
-        // turn rate) is used deliberately: n is a ratio quantity with no
-        // reliable conversion to a physical rate without pulling in
-        // assumptions (ATC_STR_RAT_MAX, YAW_CRS_RATE/YAW_CRS_THR) that were
-        // calibrated for acceleration, not braking, and n alone is already
-        // sufficient as the proportional weight. the lock releases only once
-        // the measured yaw rate's sign agrees with n again (error crossed
-        // back through zero) - normal steering then resumes from the
-        // then-current n, with no intermediate state to unwind. brk_asym
-        // always applies here: with the angle locked, this thrust can never
-        // land on the "accidentally forward" side the way an unlocked flip
-        // could - it is always genuine counter-rotation reverse thrust.
-        // MOT_VEC_BRK scales the magnitude (0 = brake off). runs whenever the
-        // allocator runs; Manual never reaches this code (bypasses via
-        // _scale_steering=false).
-        // vec_mag >= _vec_deadband guard: without it, pure sensor/filter
-        // noise at near-zero demand could set steering_angle_rad near +-90
-        // via atan2 for one tick and latch the brake on noise alone - the
-        // deadband S-blend below will suppress the *output* either way, but
-        // the latch itself would persist into the next tick without this
-        // side-flip coast trigger: demand flips sign while the previously
-        // commanded angle sat at a stop (or during an active coast window -
-        // restart covers a double-flip mid-transit). fires only with a pure
-        // rotation demand: fx>0.03 means the pivot ended and suppression is
-        // the wrong tool. gated by !_vec_rot_brake_active: during a lock the
-        // servo is held, not transiting, and zeroing throttle would kill the
-        // running brake. pivot-from-rest is safe: last angle is ~0, not a stop
+        // rotation brake (angle-locked): when the hull is overshooting a
+        // commanded rotation (or rotating undemanded), LOCK steering_angle_rad
+        // on the rotation side and apply reverse thrust - the servo never
+        // transits, so there is no 180deg sweep under load. brake magnitude
+        // scales with |yaw|/YAW_CRS_RATE (see brake_frac below). MOT_VEC_BRK
+        // scales magnitude (0 = brake off). Manual never reaches this code.
         if (!_vec_rot_brake_active &&
             vec_mag >= _vec_deadband &&
             fabsf(n) > 0.05f &&
@@ -764,11 +734,14 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         //                          benign, reverse through near-center
         //                          angles is pure deceleration, no moment.
         //   (c) yaw_overspeeds_des - measured rotation exceeds demand+3deg/s
-        // demand lanes (a/c) keep the vec_mag deadband + at-stop gates;
-        // (b) needs only |yaw|>5deg/s, the |fx|<=0.03 gate keeps it from
-        //   firing during forward driving with residual yaw.
-        // des_rate/yaw_rate sign convention verified from the log
-        // (DesTurnRate +20 -> TurnRate +9..+17).
+        // two lanes: (a) des_idle - no rotation demand (incl. 500ms timeout),
+        //   |fx|<=0.03, hull still turning >5deg/s; vec_mag/angle gates
+        //   deliberately bypassed since post-release the servo has left the
+        //   stop. (b) yaw_overspeeds_des - measured |yaw| exceeds |des|+3deg/s
+        //   in the demand direction; keeps deadband + at-stop gates.
+        // opposed-rotation with a demand (flip) is NOT a brake case - the
+        // coast-gated transit handles it; that lane was removed because it
+        // forced a 180deg servo transit under reverse thrust.
         const bool des_active        = fabsf(des_rate_dps) > 0.5f;
         const bool des_idle          = !des_active;
         const bool yaw_opposes_des   = des_active &&
@@ -780,7 +753,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             ((des_idle && fabsf(fx) <= 0.03f) ||
              (vec_mag >= _vec_deadband &&
               fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
-              (yaw_opposes_des || yaw_overspeeds_des)));
+              yaw_overspeeds_des));
 
         if (rot_brake_cond) {
             if (_vec_rot_brake_cnt < 3) {
