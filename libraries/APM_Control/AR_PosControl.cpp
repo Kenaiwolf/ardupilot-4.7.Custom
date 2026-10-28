@@ -197,7 +197,11 @@ void AR_PosControl::update(float dt)
     // cornering minimum. _turn_radius / ATC_TURN_MAX_G are left untouched and may
     // still be used elsewhere (e.g. ModeCircle::check_config_speed()); _turn_radius
     // itself becomes an unused private member of AR_PosControl after this change.
-    const float des_speed = vel_target_FR.x;
+    // reverse disabled for this boat: negative forward-back velocity target
+    // (destination behind the hull) is handled by pivoting in place at zero
+    // forward speed until the target is ahead, never by reversing. the
+    // vectored thruster can yaw at zero speed so no forward creep is needed.
+    const float des_speed = MAX(vel_target_FR.x, 0.0f);
     _desired_speed = _atc.get_desired_speed_accel_limited(des_speed, dt);
 
     // calculate turn rate from desired lateral acceleration
