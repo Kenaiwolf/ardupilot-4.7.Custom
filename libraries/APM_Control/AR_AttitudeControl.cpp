@@ -584,7 +584,7 @@ const AP_Param::GroupInfo AR_AttitudeControl::var_info[] = {
 
     // @Param: _ACC_VEQ
     // @DisplayName: Speed control equilibrium speed
-    // @Description: Equilibrium speed at full throttle in m/s - the speed where propeller thrust equals hydrodynamic drag and acceleration is zero. When set above zero, the acceleration limit applied to the desired-speed ramp varies linearly with speed: full ATC_ACCEL_MAX at 0 m/s, decaying to zero at this speed. This models boat physics where acceleration is highest from standstill and vanishes near hull equilibrium speed. 0 disables the curve (constant ATC_ACCEL_MAX limit as before).
+    // @Description: Equilibrium speed at full throttle in m/s - the speed where propeller thrust equals hydrodynamic drag and acceleration is zero. When set above zero, the acceleration limit applied to the desired-speed ramp varies linearly with speed: full ATC_ACCEL_MAX at 0 m/s, decaying to zero at this speed. This models boat physics where acceleration is highest from standstill and vanishes near hull equilibrium speed. 0 disables the curve (constant ATC_ACCEL_MAX limit as before). Acts as an implicit ceiling on achievable desired speed: the desired-speed ramp converges asymptotically and never arrives, so targets above this value leave a permanent PID error (I-term windup risk). Even targets below it are approached lazily, which keeps a small steady error under ATC_SPEED_I - normal behavior, not a fault. Set above the boat's real equilibrium speed.
     // @Range: 0.0 10.0
     // @Increment: 0.05
     // @Units: m/s
@@ -597,16 +597,16 @@ const AP_Param::GroupInfo AR_AttitudeControl::var_info[] = {
     // @Range: 0.0 1.0
     // @Increment: 0.005
     // @User: Advanced
-    AP_GROUPINFO("_DEC_V2", 19, AR_AttitudeControl, _throttle_decel_v2, 0.07f),
+    AP_GROUPINFO("_DEC_V2", 19, AR_AttitudeControl, _throttle_decel_v2, 0.065f),
 
     // @Param: _DEC_MIN
     // @DisplayName: Speed control minimum deceleration
     // @Description: Minimum deceleration in m/s/s used by the quadratic deceleration curve (ATC_DEC_V2) and by stopping distance planning. Pure coasting drag approaches zero at low speed and the vehicle never fully stops, so this floor keeps the planner finite. Only used when ATC_DEC_V2 is non-zero.
-    // @Range: 0.005 1.0
-    // @Increment: 0.005
+    // @Range: 0.001 1.0
+    // @Increment: 0.001
     // @Units: m/s/s
     // @User: Advanced
-    AP_GROUPINFO("_DEC_MIN", 20, AR_AttitudeControl, _throttle_decel_min, 0.02f),
+    AP_GROUPINFO("_DEC_MIN", 20, AR_AttitudeControl, _throttle_decel_min, 0.005f),
 
     // @Param: _DEC_BRK
     // @DisplayName: Speed control braking deceleration multiplier
@@ -614,7 +614,7 @@ const AP_Param::GroupInfo AR_AttitudeControl::var_info[] = {
     // @Range: 0.0 5.0
     // @Increment: 0.1
     // @User: Advanced
-    AP_GROUPINFO("_DEC_BRK", 21, AR_AttitudeControl, _throttle_decel_brake_mult, 2.0f),
+    AP_GROUPINFO("_DEC_BRK", 21, AR_AttitudeControl, _throttle_decel_brake_mult, 2.5f),
 
     AP_GROUPEND
 };
@@ -1151,8 +1151,13 @@ float AR_AttitudeControl::get_desired_speed_accel_limited(float desired_speed, f
     // speed-dependent curves are evaluated at the current desired speed
     float speed_change_max;
     if (fabsf(desired_speed) < fabsf(_desired_speed)) {
-        // slowing down: deceleration curve, reversed-output braking when enabled
-        speed_change_max = get_decel_max_at_speed(_desired_speed, true) * dt;
+        // slowing down: deceleration curve. braking=true only while moving  
+        // forward (prev positive): slowing then means counter-thrust via  
+        // REVERSED prop, which is what DEC_BRK was tuned for. slowing out of  
+        // reverse means forward thrust - a different prop asymmetry DEC_BRK  
+        // does not model.  
+        speed_change_max = get_decel_max_at_speed(_desired_speed,  
+                                                is_positive(_desired_speed)) * dt;
     } else {
         // speeding up: acceleration curve
         speed_change_max = get_accel_max_at_speed(_desired_speed) * dt;
