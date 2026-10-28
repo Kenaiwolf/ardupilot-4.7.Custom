@@ -629,8 +629,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             constrain_float((angle_deg - bld_start_deg) / (bld_end_deg - bld_start_deg), 0.0f, 1.0f) : 1.0f;
         const float w = sq(sinf(angle_ratio * M_PI_2));
         const float pivot_expo = MAX(_vec_yaw_lin_expo, 1.0f);
-        float t_pivot;
-        // cruise-model feedforward for pivot throttle: scale the calibrated
+        // cruise-model feedforward for pivot throttle:
         // curve by demanded turn rate (YAW_CRS_THR maps YAW_CRS_RATE deg/s,
         // 49% -> 16deg/s; ratio uncapped above 1 -> demand past the
         // calibration point stretches the curve, e.g. 20deg/s ->
@@ -644,6 +643,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         const AR_AttitudeControl *att = AR_AttitudeControl::get_singleton();
         const float des_rate_dps = (att != nullptr) ?
             degrees(att->get_desired_turn_rate()) : 0.0f;
+        const float des_rate_rads = radians(des_rate_dps);
         float t_pivot;
         if (is_positive(_yaw_crs_rate_dps) && is_positive(_yaw_crs_thr_pct)) {
             const float rate_ratio = is_positive(fabsf(des_rate_dps)) ?
@@ -748,12 +748,39 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // brake actively accelerate the wrong-direction rotation instead of
         // fighting it. this produced a full 360deg wrong-direction pivot in
         // the field. entry (3 opposed ticks) is unchanged.
+        // brake latch keyed on the DEMAND (des_rate), not on n: after a pivot
+        // release the I-term keeps n on the same side as the rotation for
+        // ~8s (log), so sign(yaw)!=sign(n) never held and the brake stayed
+        // dead through the whole passive runout. three lanes:
+        //   (a) yaw_opposes_des    - rotation opposite the demand
+        //   (b) des_idle           - demand gone (incl. 500ms timeout) with
+        //                          pure-rotation state (fx<=0.03) while the
+        //                          hull still turns. vec_mag/angle gates are
+        //                          deliberately bypassed: post-release n and
+        //                          the servo leave the stop, so those gates
+        //                          can never let this lane in. entry may
+        //                          latch off-stop; the servo slews to the
+        //                          lock side under live reverse thrust -
+        //                          benign, reverse through near-center
+        //                          angles is pure deceleration, no moment.
+        //   (c) yaw_overspeeds_des - measured rotation exceeds demand+3deg/s
+        // demand lanes (a/c) keep the vec_mag deadband + at-stop gates;
+        // (b) needs only |yaw|>5deg/s, the |fx|<=0.03 gate keeps it from
+        //   firing during forward driving with residual yaw.
+        // des_rate/yaw_rate sign convention verified from the log
+        // (DesTurnRate +20 -> TurnRate +9..+17).
+        const bool des_active        = fabsf(des_rate_dps) > 0.5f;
+        const bool des_idle          = !des_active;
+        const bool yaw_opposes_des   = des_active &&
+            (is_positive(yaw_rate_rads) != is_positive(des_rate_rads));
+        const bool yaw_overspeeds_des = des_active &&
+            (fabsf(yaw_rate_rads) > fabsf(des_rate_rads) + radians(3.0f));
         const bool rot_brake_cond =
-            vec_mag >= _vec_deadband &&
-            fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
-            fabsf(n) > 0.05f &&
             fabsf(yaw_rate_rads) > radians(5.0f) &&
-            (is_positive(yaw_rate_rads) != is_positive(n));
+            ((des_idle && fabsf(fx) <= 0.03f) ||
+             (vec_mag >= _vec_deadband &&
+              fabsf(steering_angle_rad) >= vector_angle_max_rad - 1e-4f &&
+              (yaw_opposes_des || yaw_overspeeds_des)));
 
         if (rot_brake_cond) {
             if (_vec_rot_brake_cnt < 3) {
@@ -765,13 +792,14 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
 
         if (!_vec_rot_brake_active && _vec_rot_brake_cnt >= 3) {
             _vec_rot_brake_cnt = 0;
-            // re-lock on the SAME side as the previous lock proves the earlier
-            // release was premature (servo never crossed center) - end the
-            // transit suppression instantly so the brake can work. a re-lock
-            // on the OPPOSITE side does NOT clear it: the servo still needs
-            // the full VEC_TRN_MS transit window from the original release.
+            // des_idle latch must also clear the coast window: an off-stop
+            // latch (post-release runout) fails the same-side test below
+            // because the servo already left the stop, and the coast block
+            // runs AFTER the brake output - without this the brake would
+            // sit locked at zero throttle for the whole VEC_TRN_MS window.
             if (_vec_pivot_coast_ms != 0 &&
-                is_positive(steering_angle_rad) == is_positive(_vec_rot_brake_angle_rad)) {
+                (des_idle ||
+                 is_positive(steering_angle_rad) == is_positive(_vec_rot_brake_angle_rad))) {
                 _vec_pivot_coast_ms = 0;
             }
             _vec_rot_brake_active = true;
@@ -814,17 +842,15 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         if (_vec_rot_brake_active) {
             steering_angle_rad = _vec_rot_brake_angle_rad;
             const float brake_scale = MAX(_vec_brk_pct, 0.0f) * 0.01f;  // negative param must never flip the brake into forward thrust
-            // brake_frac MAGNITUDE still scales with |n| (more commanded
-            // effort -> proportionally more counter-thrust), but the THRUST
-            // SIGN must be fixed to the locked angle's side, never to n: n
-            // can flip sign mid-lock, and if thrust sign followed it, the
-            // "brake" would start pushing WITH the real (wrong-direction)
-            // rotation instead of against it - this was the root cause of
-            // the observed 360deg wrong-direction pivot. reverse thrust
-            // through _vec_rot_brake_angle_rad (set from yaw_rate_rads at
-            // lock time, i.e. the real overshoot side) always opposes the
-            // actual rotation regardless of what n does while locked.
-            const float brake_frac = fabsf(n) * brake_scale;
+            // brake_frac magnitude scales with the measured runaway, not |n|:
+            // after a pivot release n sits on the same side as the rotation
+            // (I-term runout) and says nothing about how hard the hull is
+            // escaping. |yaw|/YAW_CRS_RATE is a unitless runaway ratio capped
+            // at 1 (the D-term semantics the P-only pivot lacks); |n|
+            // fallback only if the calibration param is unset.
+            const float overshoot_ratio = is_positive(_yaw_crs_rate_dps) ?
+                MIN(fabsf(yaw_rate_rads) / radians(_yaw_crs_rate_dps), 1.0f) : fabsf(n);
+            const float brake_frac = overshoot_ratio * brake_scale;
             // copysignf(frac, -angle) produced FORWARD thrust through the
             // -90deg locked stop, which the log confirmed as ~99% forward
             // (matches brake_frac*brk_asym = 0.80*1.24, unreachable via the
