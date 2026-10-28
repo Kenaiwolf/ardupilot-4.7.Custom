@@ -662,7 +662,7 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         // sign product can hit -0.0 filter noise (steering_angle tiny
         // negative with n==0 flips vec_mag reverse for a forward demand).
         if (fabsf(n) > 0.01f) {
-            t_pivot *= copysignf(1.0f, steering_angle_rad * n);
+            t_pivot = copysignf(fabsf(t_pivot), steering_angle_rad * n);
         }
         throttle_norm = t_vector * (1.0f - w) + t_pivot * w;
 
