@@ -746,7 +746,14 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
         const bool des_idle          = !des_active;
         const bool yaw_opposes_des   = des_active &&
             (is_positive(yaw_rate_rads) != is_positive(des_rate_rads));
-        const bool yaw_overspeeds_des = des_active &&
+        // runaway lane (c): rotation overspeeding IN the demanded direction.
+        // !yaw_opposes_des is mandatory, not redundant: |yaw|>|des|+3 alone
+        // also matches rotation opposed to the demand (drift, small-demand
+        // flip) - latching there forces a 180deg servo transit under
+        // reverse thrust, the exact regime the brake exists to prevent.
+        // opposed rotation is handled by normal allocation (its counter-
+        // moment then serves the demand too), or by coast-gated transit.
+        const bool yaw_overspeeds_des = des_active && !yaw_opposes_des &&
             (fabsf(yaw_rate_rads) > fabsf(des_rate_rads) + radians(3.0f));
         const bool rot_brake_cond =
             fabsf(yaw_rate_rads) > radians(5.0f) &&
