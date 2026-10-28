@@ -811,8 +811,9 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             // overshoot. yaw_rate_rads is the authoritative side indicator
             _vec_rot_brake_angle_rad = copysignf(vector_angle_max_rad, yaw_rate_rads);
         } else if (_vec_rot_brake_active &&
-                   (fabsf(yaw_rate_rads) <= radians(3.0f) || fabsf(fx) > 0.03f)) {
-            // release on EITHER: (a) the overshoot the brake was fighting has
+                   (fabsf(yaw_rate_rads) <= radians(3.0f) || fabsf(fx) > 0.03f ||
+                    (des_active && !yaw_opposes_des && !yaw_overspeeds_des))) {
+            // release on ANY of: (a) the overshoot the brake was fighting has
             // actually collapsed - |yaw_rate| back under 3deg/s, below the
             // 5deg/s entry threshold (hysteresis so it doesn't chatter right
             // at the entry line). this is deliberately independent of n/n's sign:
@@ -823,18 +824,27 @@ void AP_MotorsUGV::vectored_allocate(float fx_req, float n_req, float ground_spe
             // +-90deg envelope, so re-triggering the instant this clears is
             // not possible. fx=0.03 is a wide margin: even at n=1 it already
             // pulls delta to ~88 deg, well clear of the
-            // vector_angle_max_rad-1e-4 trigger threshold.
+            // vector_angle_max_rad-1e-4 trigger threshold. or (c) the demand
+            // has reappeared and now AGREES with the rotation direction while
+            // the hull is not running away - the pilot asked for this same
+            // rotation, so holding the lock would keep braking a commanded
+            // pivot. opposite-side demands keep the latch via yaw_opposes_des.
             _vec_rot_brake_active = false;
 			_vec_rot_brake_cnt = 0;  // stale count during the lock would bypass
                                      // the debounce on re-entry (angle stays
                                      // pinned at the stop so cond keeps counting)
                                      // - each re-latch must re-earn its 3 ticks
-            // start the servo-transit suppression window only on a
-            // yaw-agreement release with no forward demand - the servo is
-            // about to traverse +-90deg through center and any thrust during
-            // that sweep lands partly forward. window length is VEC_TRN_MS;
-            // a side-flip from saturation can also arm it (above)
-            if (fabsf(fx) <= 0.03f) {
+            // start the servo-transit suppression window ONLY when the demand
+            // points to the opposite side of the locked angle with no forward
+            // demand - the servo is about to traverse +-90deg through center
+            // and any thrust during that sweep lands partly forward. a
+            // same-side release needs NO transit (servo stays on the lock
+            // side), so arming the window there would just mute pivot thrust
+            // for the whole VEC_TRN_MS. window length is VEC_TRN_MS; a
+            // side-flip from saturation can also arm it via the side-flip
+            // trigger above (fires on sign(n) vs last steering angle).
+            if (fabsf(fx) <= 0.03f &&
+                is_positive(n) != is_positive(_vec_rot_brake_angle_rad)) {
                 _vec_pivot_coast_ms = AP_HAL::millis();
             }
         }
