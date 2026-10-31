@@ -1,3 +1,5 @@
+# My account will be suspended tomorrow because I refuse to give GIT my personal information so this REPO. is abandon because of GIThub. I HAVE NO ACCESS TO THIS REPO ANYMORE!
+
 # Fork Documentation: Kenaiwolf/ardupilot-4.7.Custom — Rover Vectored-Thrust Drift Compensation
 
 **Fork base:** upstream ArduPilot **Rover 4.7.1** (release line ending at `dbe79216`, Sep 2026). Fork work begins at `baab9fab` ("nutne minimum V1"); fork work is ongoing — see `git log` for the latest commit.
